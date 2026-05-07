@@ -92,7 +92,16 @@ def main_kb():
         [InlineKeyboardButton(text="🎁 RESGATAR 3 DIAS GRÁTIS", callback_data="trial")],
         [InlineKeyboardButton(text="💎 VER PLANOS", callback_data="planos")],
         [InlineKeyboardButton(text="👤 MEU PERFIL", callback_data="perfil")],
-        [InlineKeyboardButton(text="📲 SUPORTE", url=f"https://t.me/{SUPORTE_USERNAME}")],
+
+        [InlineKeyboardButton(
+            text="📖 COMO CONFIGURAR",
+            url="https://t.me/aulasloopgram"
+        )],
+
+        [InlineKeyboardButton(
+            text="📞 SUPORTE",
+            url=f"https://t.me/{SUPORTE_USERNAME}"
+        )],
     ])
 
 def planos_kb():
