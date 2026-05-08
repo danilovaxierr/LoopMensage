@@ -13,7 +13,13 @@ import uvicorn
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneNumberInvalidError, PhoneCodeExpiredError
+from telethon.errors import (
+    SessionPasswordNeededError,
+    PhoneCodeInvalidError,
+    PhoneNumberInvalidError,
+    PhoneCodeExpiredError,
+    FloodWaitError
+)
 from telethon.tl.types import Channel, Chat
 
 load_dotenv()
@@ -538,14 +544,29 @@ async def state_messages(m: Message):
                 "created_at": datetime.datetime.utcnow().isoformat()
             }
 
+            tipo_codigo = sent.type.__class__.__name__
+
             await m.answer(
-                "✅ Código enviado para seu Telegram.\n\n"
+                "✅ Pedido de código enviado ao Telegram.\n\n"
+                f"📲 Método: {tipo_codigo}\n\n"
+                "Veja onde o Telegram mandou:\n"
+                "• App Telegram oficial\n"
+                "• SMS\n"
+                "• Ligação\n"
+                "• Notificação do Telegram\n\n"
                 "Envie o código MAIS RECENTE aqui.\n"
                 "Exemplo: 12345\n\n"
                 "⚠️ Não aperte conectar de novo antes de enviar o código."
             )
         except PhoneNumberInvalidError:
             await m.answer("❌ Número inválido. Use formato internacional, exemplo: +5521999999999")
+
+        except FloodWaitError as e:
+            await m.answer(
+                f"⏳ Telegram limitou novas tentativas.\n\n"
+                f"Espere {e.seconds} segundos antes de tentar novamente."
+            )
+
         except Exception as e:
             await m.answer(f"❌ Erro ao enviar código: {e}")
         return
