@@ -507,27 +507,42 @@ async def state_messages(m: Message):
     step = state.get("step")
 
     if step == "phone":
-        phone = m.text.strip().replace(" ", "")
+        phone = m.text.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         try:
+            # Mantém o MESMO client vivo na memória até o usuário mandar o código.
+            # Isso evita o erro "The confirmation code has expired" causado por trocar sessão/client.
+            old_client = state.get("client")
+            if old_client:
+                try:
+                    await old_client.disconnect()
+                except Exception:
+                    pass
+
             client = make_client()
             await client.connect()
             sent = await client.send_code_request(phone)
 
-            # Salva o hash + sessão temporária no banco.
-            # Isso evita o erro de código expirado quando o Render reinicia ou troca processo.
+            # Salva também no banco como backup, mas o login principal usa o client em memória.
             await save_temp_login(
                 user_id=user_id,
                 phone=phone,
                 phone_code_hash=sent.phone_code_hash,
                 temp_session=client.session.save()
             )
-            await client.disconnect()
 
-            LOGIN_STATE[user_id] = {"step": "code"}
+            LOGIN_STATE[user_id] = {
+                "step": "code",
+                "phone": phone,
+                "phone_code_hash": sent.phone_code_hash,
+                "client": client,
+                "created_at": datetime.datetime.utcnow().isoformat()
+            }
+
             await m.answer(
                 "✅ Código enviado para seu Telegram.\n\n"
                 "Envie o código MAIS RECENTE aqui.\n"
-                "Exemplo: 12345"
+                "Exemplo: 12345\n\n"
+                "⚠️ Não aperte conectar de novo antes de enviar o código."
             )
         except PhoneNumberInvalidError:
             await m.answer("❌ Número inválido. Use formato internacional, exemplo: +5521999999999")
@@ -537,27 +552,43 @@ async def state_messages(m: Message):
 
     if step == "code":
         code = m.text.strip().replace(" ", "").replace("-", "")
-        temp = await get_temp_login(user_id)
+        phone = state.get("phone")
+        phone_code_hash = state.get("phone_code_hash")
+        client = state.get("client")
 
-        if not temp:
-            LOGIN_STATE.pop(user_id, None)
-            await m.answer(
-                "❌ Login expirou no servidor.\n\n"
-                "Clique em 🔐 CONECTAR CONTA TELEGRAM e peça um código novo."
-            )
-            return
-
-        phone, phone_code_hash, temp_session, created_at = temp
-
-        try:
+        # Fallback caso o Render tenha reiniciado entre pedir código e confirmar.
+        if not phone or not phone_code_hash or not client:
+            temp = await get_temp_login(user_id)
+            if not temp:
+                LOGIN_STATE.pop(user_id, None)
+                await m.answer(
+                    "❌ Login expirou no servidor.\n\n"
+                    "Clique em 🔐 CONECTAR CONTA TELEGRAM e peça um código novo."
+                )
+                return
+            phone, phone_code_hash, temp_session, created_at = temp
             client = make_client(temp_session or "")
             await client.connect()
-            await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+
+        try:
+            if not client.is_connected():
+                await client.connect()
+
+            await client.sign_in(
+                phone=phone,
+                code=code,
+                phone_code_hash=phone_code_hash
+            )
 
             session_string = client.session.save()
             await save_session(user_id, phone, session_string)
             await clear_temp_login(user_id)
-            await client.disconnect()
+
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
             LOGIN_STATE.pop(user_id, None)
             await m.answer(
                 "✅ Conta conectada com sucesso!\n\n"
@@ -566,14 +597,24 @@ async def state_messages(m: Message):
                 "e selecione onde você é admin."
             )
         except SessionPasswordNeededError:
-            LOGIN_STATE[user_id] = {"step": "password"}
+            LOGIN_STATE[user_id] = {
+                "step": "password",
+                "phone": phone,
+                "phone_code_hash": phone_code_hash,
+                "client": client
+            }
             await m.answer("🔐 Sua conta tem senha 2FA. Envie sua senha para finalizar o login.")
         except PhoneCodeExpiredError:
             await clear_temp_login(user_id)
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
             LOGIN_STATE[user_id] = {"step": "phone"}
             await m.answer(
                 "❌ Esse código expirou ou foi substituído por outro.\n\n"
-                "Envie seu número novamente e use o código mais novo que chegar."
+                "Envie seu número novamente e use APENAS o código mais novo que chegar.\n"
+                "Não clique em conectar várias vezes."
             )
         except PhoneCodeInvalidError:
             await m.answer("❌ Código inválido. Confira o código mais novo e tente enviar novamente.")
@@ -583,23 +624,33 @@ async def state_messages(m: Message):
 
     if step == "password":
         password = m.text.strip()
-        temp = await get_temp_login(user_id)
+        phone = state.get("phone")
+        client = state.get("client")
 
-        if not temp:
-            LOGIN_STATE.pop(user_id, None)
-            await m.answer("❌ Login expirou. Conecte a conta novamente.")
-            return
-
-        phone, phone_code_hash, temp_session, created_at = temp
-
-        try:
+        if not client:
+            temp = await get_temp_login(user_id)
+            if not temp:
+                LOGIN_STATE.pop(user_id, None)
+                await m.answer("❌ Login expirou. Conecte a conta novamente.")
+                return
+            phone, phone_code_hash, temp_session, created_at = temp
             client = make_client(temp_session or "")
             await client.connect()
+
+        try:
+            if not client.is_connected():
+                await client.connect()
+
             await client.sign_in(password=password)
             session_string = client.session.save()
-            await save_session(user_id, phone, session_string)
+            await save_session(user_id, phone or "", session_string)
             await clear_temp_login(user_id)
-            await client.disconnect()
+
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
             LOGIN_STATE.pop(user_id, None)
             await m.answer(
                 "✅ Conta conectada com sucesso!\n\n"
