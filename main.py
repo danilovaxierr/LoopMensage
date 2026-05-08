@@ -91,6 +91,7 @@ def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 RESGATAR 3 DIAS GRÁTIS", callback_data="trial")],
         [InlineKeyboardButton(text="💎 VER PLANOS", callback_data="planos")],
+        [InlineKeyboardButton(text="⚙️ CONFIGURAR LOOP", callback_data="config_loop")],
         [InlineKeyboardButton(text="👤 MEU PERFIL", callback_data="perfil")],
 
         [InlineKeyboardButton(
@@ -142,6 +143,75 @@ async def trial(c: CallbackQuery):
 async def planos(c: CallbackQuery):
     texto = "💎 PLANOS DISPONÍVEIS\n\nEscolha um plano abaixo para gerar Pix automático com QR Code."
     await c.message.edit_text(texto, reply_markup=planos_kb())
+
+@dp.callback_query(F.data == "config_loop")
+async def config_loop(c: CallbackQuery):
+    texto = """
+⚙️ CONFIGURAR LOOP MENSAGE
+
+Aqui você configura sua divulgação automática segura.
+
+✅ Permitido:
+• Grupos onde você é admin
+• Canais onde você é admin
+• Mensagens com intervalo alto
+• Pausar quando quiser
+
+🚫 Não permitido:
+• Enviar em grupos onde você não é admin
+• Enviar privado para pessoas
+• Spam em massa
+
+Escolha uma opção:
+"""
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔐 CONECTAR CONTA TELEGRAM", callback_data="connect_account")],
+        [InlineKeyboardButton(text="📢 MEUS GRUPOS/CANAIS", callback_data="my_chats")],
+        [InlineKeyboardButton(text="📝 DEFINIR MENSAGEM", callback_data="set_message")],
+        [InlineKeyboardButton(text="⏱️ DEFINIR INTERVALO", callback_data="set_interval")],
+        [InlineKeyboardButton(text="▶️ INICIAR LOOP", callback_data="start_loop")],
+        [InlineKeyboardButton(text="⏹️ PARAR LOOP", callback_data="stop_loop")],
+        [InlineKeyboardButton(text="⬅️ VOLTAR", callback_data="voltar")],
+    ])
+
+    await c.message.edit_text(texto, reply_markup=kb)
+
+
+@dp.callback_query(F.data == "connect_account")
+async def connect_account(c: CallbackQuery):
+    await c.answer()
+    await c.message.answer(
+        "🔐 Conectar conta Telegram\n\n"
+        "Essa parte será feita com Telethon.\n"
+        "Na próxima etapa vamos adicionar login por número + código.\n\n"
+        "⚠️ Use apenas em grupos/canais onde você é admin."
+    )
+
+
+@dp.callback_query(F.data == "my_chats")
+async def my_chats(c: CallbackQuery):
+    await c.answer("Em breve: listar grupos/canais onde você é admin.", show_alert=True)
+
+
+@dp.callback_query(F.data == "set_message")
+async def set_message(c: CallbackQuery):
+    await c.answer("Em breve: cadastrar mensagem.", show_alert=True)
+
+
+@dp.callback_query(F.data == "set_interval")
+async def set_interval(c: CallbackQuery):
+    await c.answer("Em breve: definir intervalo mínimo seguro.", show_alert=True)
+
+
+@dp.callback_query(F.data == "start_loop")
+async def start_loop(c: CallbackQuery):
+    await c.answer("Em breve: iniciar divulgação segura.", show_alert=True)
+
+
+@dp.callback_query(F.data == "stop_loop")
+async def stop_loop(c: CallbackQuery):
+    await c.answer("Em breve: parar divulgação.", show_alert=True)
 
 async def syncpay_create_pix(order_id: str, amount: Decimal, user_id: int, desc: str):
     # IMPORTANTE: ajuste os endpoints/campos conforme sua documentação SyncPay.
