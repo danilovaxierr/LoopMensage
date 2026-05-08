@@ -13,7 +13,7 @@ import uvicorn
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneNumberInvalidError
+from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneNumberInvalidError, PhoneCodeExpiredError
 from telethon.tl.types import Channel, Chat
 
 load_dotenv()
@@ -76,6 +76,14 @@ async def db_init():
             phone TEXT,
             session_string TEXT,
             connected_at TEXT
+        )""")
+
+        await db.execute("""CREATE TABLE IF NOT EXISTS temp_logins(
+            user_id INTEGER PRIMARY KEY,
+            phone TEXT,
+            phone_code_hash TEXT,
+            temp_session TEXT,
+            created_at TEXT
         )""")
 
         await db.execute("""CREATE TABLE IF NOT EXISTS loop_config(
@@ -221,6 +229,27 @@ async def save_session(user_id: int, phone: str, session_string: str):
             "INSERT OR REPLACE INTO tg_sessions(user_id, phone, session_string, connected_at) VALUES(?,?,?,?)",
             (user_id, phone, session_string, datetime.datetime.utcnow().isoformat())
         )
+        await db.commit()
+
+async def save_temp_login(user_id: int, phone: str, phone_code_hash: str, temp_session: str):
+    async with aiosqlite.connect(DB) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO temp_logins(user_id, phone, phone_code_hash, temp_session, created_at) VALUES(?,?,?,?,?)",
+            (user_id, phone, phone_code_hash, temp_session, datetime.datetime.utcnow().isoformat())
+        )
+        await db.commit()
+
+async def get_temp_login(user_id: int):
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT phone, phone_code_hash, temp_session, created_at FROM temp_logins WHERE user_id=?",
+            (user_id,)
+        )
+        return await cur.fetchone()
+
+async def clear_temp_login(user_id: int):
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("DELETE FROM temp_logins WHERE user_id=?", (user_id,))
         await db.commit()
 
 async def get_admin_chats(user_id: int):
@@ -478,20 +507,26 @@ async def state_messages(m: Message):
     step = state.get("step")
 
     if step == "phone":
-        phone = m.text.strip()
+        phone = m.text.strip().replace(" ", "")
         try:
             client = make_client()
             await client.connect()
             sent = await client.send_code_request(phone)
-            LOGIN_STATE[user_id] = {
-                "step": "code",
-                "phone": phone,
-                "phone_code_hash": sent.phone_code_hash,
-                "client": client
-            }
+
+            # Salva o hash + sessão temporária no banco.
+            # Isso evita o erro de código expirado quando o Render reinicia ou troca processo.
+            await save_temp_login(
+                user_id=user_id,
+                phone=phone,
+                phone_code_hash=sent.phone_code_hash,
+                temp_session=client.session.save()
+            )
+            await client.disconnect()
+
+            LOGIN_STATE[user_id] = {"step": "code"}
             await m.answer(
                 "✅ Código enviado para seu Telegram.\n\n"
-                "Envie o código aqui.\n"
+                "Envie o código MAIS RECENTE aqui.\n"
                 "Exemplo: 12345"
             )
         except PhoneNumberInvalidError:
@@ -501,15 +536,27 @@ async def state_messages(m: Message):
         return
 
     if step == "code":
-        code = m.text.strip().replace(" ", "")
-        phone = state["phone"]
-        phone_code_hash = state["phone_code_hash"]
-        client = state["client"]
+        code = m.text.strip().replace(" ", "").replace("-", "")
+        temp = await get_temp_login(user_id)
+
+        if not temp:
+            LOGIN_STATE.pop(user_id, None)
+            await m.answer(
+                "❌ Login expirou no servidor.\n\n"
+                "Clique em 🔐 CONECTAR CONTA TELEGRAM e peça um código novo."
+            )
+            return
+
+        phone, phone_code_hash, temp_session, created_at = temp
 
         try:
+            client = make_client(temp_session or "")
+            await client.connect()
             await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
+
             session_string = client.session.save()
             await save_session(user_id, phone, session_string)
+            await clear_temp_login(user_id)
             await client.disconnect()
             LOGIN_STATE.pop(user_id, None)
             await m.answer(
@@ -519,23 +566,39 @@ async def state_messages(m: Message):
                 "e selecione onde você é admin."
             )
         except SessionPasswordNeededError:
-            LOGIN_STATE[user_id]["step"] = "password"
+            LOGIN_STATE[user_id] = {"step": "password"}
             await m.answer("🔐 Sua conta tem senha 2FA. Envie sua senha para finalizar o login.")
+        except PhoneCodeExpiredError:
+            await clear_temp_login(user_id)
+            LOGIN_STATE[user_id] = {"step": "phone"}
+            await m.answer(
+                "❌ Esse código expirou ou foi substituído por outro.\n\n"
+                "Envie seu número novamente e use o código mais novo que chegar."
+            )
         except PhoneCodeInvalidError:
-            await m.answer("❌ Código inválido. Tente enviar novamente.")
+            await m.answer("❌ Código inválido. Confira o código mais novo e tente enviar novamente.")
         except Exception as e:
             await m.answer(f"❌ Erro no login: {e}")
         return
 
     if step == "password":
         password = m.text.strip()
-        client = state["client"]
-        phone = state["phone"]
+        temp = await get_temp_login(user_id)
+
+        if not temp:
+            LOGIN_STATE.pop(user_id, None)
+            await m.answer("❌ Login expirou. Conecte a conta novamente.")
+            return
+
+        phone, phone_code_hash, temp_session, created_at = temp
 
         try:
+            client = make_client(temp_session or "")
+            await client.connect()
             await client.sign_in(password=password)
             session_string = client.session.save()
             await save_session(user_id, phone, session_string)
+            await clear_temp_login(user_id)
             await client.disconnect()
             LOGIN_STATE.pop(user_id, None)
             await m.answer(
