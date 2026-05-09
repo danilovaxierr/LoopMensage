@@ -243,46 +243,48 @@ async def user_loop_task(user_id: int):
     while True:
         try:
             config = await get_loop_config(user_id)
-            if not config or config[2] == 0:  # running == 0
-                break
+            if not config or config[2] != 1:  # running deve ser 1
+                await asyncio.sleep(10)
+                continue
 
             message = config[0]
             interval = config[1] or 3600
 
             if not message:
-                await asyncio.sleep(60)
+                await asyncio.sleep(30)
                 continue
 
             session_string = await get_session(user_id)
             if not session_string:
-                break
+                await asyncio.sleep(60)
+                continue
 
             client = make_client(session_string)
             await client.connect()
 
             chats = await get_user_chats(user_id)
             if not chats:
-                await asyncio.sleep(300)
                 await client.disconnect()
+                await asyncio.sleep(60)
                 continue
 
+            sent_count = 0
             for chat_id, title in chats:
-                await send_loop_message(client, chat_id, message)
-                await asyncio.sleep(3)  # Delay anti-flood
+                success = await send_loop_message(client, chat_id, message)
+                if success:
+                    sent_count += 1
+                await asyncio.sleep(4)  # Delay maior para evitar flood
 
             await client.disconnect()
+            print(f"Loop usuário {user_id}: enviou em {sent_count}/{len(chats)} chats")
+
             await asyncio.sleep(interval)
 
+        except asyncio.CancelledError:
+            break
         except Exception as e:
-            print(f"Erro no loop do usuário {user_id}: {e}")
-            await asyncio.sleep(60)
-
-
-def start_user_loop(user_id: int):
-    if user_id in USER_TASKS and not USER_TASKS[user_id].done():
-        return
-    task = asyncio.create_task(user_loop_task(user_id))
-    USER_TASKS[user_id] = task
+            print(f"Erro no loop {user_id}: {e}")
+            await asyncio.sleep(30)
     
 # =========================
 # LISTAR E GERENCIAR GRUPOS/CANAIS
@@ -621,6 +623,17 @@ async def perfil(c: CallbackQuery):
 async def voltar(c: CallbackQuery):
     await c.message.edit_text("Menu principal:", reply_markup=main_kb())
 
+
+# ====================== CALLBACK CONFIGURAR LOOP ======================
+
+@dp.callback_query(F.data == "config_loop")
+async def config_loop(c: CallbackQuery):
+    await c.answer()
+    await c.message.edit_text(
+        "⚙️ **CONFIGURAR LOOP**\n\nEscolha uma opção abaixo:",
+        reply_markup=config_kb()
+    )
+    
 # ====================== CONFIGURAÇÃO DO LOOP ======================
 
 @dp.callback_query(F.data == "set_message")
@@ -698,72 +711,21 @@ ADMIN_PASSWORD = "147147147"
 @dp.message(Command("admin"))
 async def admin_panel(m: Message):
     try:
-        # Verifica se digitou a senha depois do comando
-        text = m.text.strip()
-        if len(text.split()) < 2 or text.split()[1] != ADMIN_PASSWORD:
-            await m.answer("❌ Senha incorreta!\n\nUse: `/admin 147147147`", parse_mode="Markdown")
+        senha = m.text.strip().split()[1]
+        if senha != ADMIN_PASSWORD:
+            await m.answer("❌ Senha incorreta!")
             return
     except:
-        await m.answer("❌ Use: `/admin 147147147`", parse_mode="Markdown")
+        await m.answer("❌ Use: `/admin 147147147`")
         return
 
-    # Se chegou aqui, senha está correta
     await m.answer(
-        "🔐 **PAINEL ADMINISTRATIVO LIBERADO**\n\n"
-        "Comandos disponíveis:\n\n"
-        "• `/adddias ID_USUARIO DIAS`\n"
-        "  Exemplo: `/adddias 123456789 30`\n\n"
-        "• `/status ID_USUARIO`\n\n"
-        "⚠️ Este painel está público com senha. Use com cuidado.",
+        "✅ **PAINEL ADMIN LIBERADO**\n\n"
+        "Comandos:\n"
+        "`/adddias ID_USUARIO DIAS`\n"
+        "`/status ID_USUARIO`",
         parse_mode="Markdown"
     )
-
-
-@dp.message(Command("adddias"))
-async def add_dias(m: Message):
-    try:
-        parts = m.text.strip().split()
-        user_id = int(parts[1])
-        dias = int(parts[2])
-        
-        minutes = dias * 1440
-        new_exp = await add_time(user_id, minutes)
-        
-        await m.answer(
-            f"✅ **Adicionado com sucesso!**\n\n"
-            f"Usuário: `{user_id}`\n"
-            f"Dias adicionados: **{dias}**\n"
-            f"Nova expiração: `{new_exp}`",
-            parse_mode="Markdown"
-        )
-    except:
-        await m.answer("❌ Uso correto:\n`/adddias ID_DO_USUARIO QUANTIDADE_DIAS`")
-
-
-@dp.message(Command("status"))
-async def user_status(m: Message):
-    try:
-        user_id = int(m.text.split()[1])
-        
-        active = await is_active(user_id)
-        session = await get_session(user_id)
-        chats = await get_user_chats(user_id)
-        config = await get_loop_config(user_id)
-        
-        status = "🟢 ATIVO" if active else "🔴 INATIVO"
-        loop_status = "▶️ RODANDO" if config and config[2] == 1 else "⏹️ PARADO"
-        
-        await m.answer(
-            f"👤 **Status do Usuário**\n\n"
-            f"ID: `{user_id}`\n"
-            f"Status: **{status}**\n"
-            f"Loop: {loop_status}\n"
-            f"Grupos/Canais: {len(chats)}\n"
-            f"Conta TG: {'✅ Conectada' if session else '❌ Não conectada'}",
-            parse_mode="Markdown"
-        )
-    except:
-        await m.answer("❌ Uso correto: `/status ID_DO_USUARIO`")
 
 # =========================
 # RUN (PARA RENDER)
