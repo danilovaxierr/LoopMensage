@@ -7,37 +7,24 @@ import re
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI
 import uvicorn
 
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from telethon.errors import (
-    SessionPasswordNeededError,
-    PhoneCodeInvalidError,
-    PhoneNumberInvalidError,
-    PhoneCodeExpiredError,
-    FloodWaitError
-)
-from telethon.tl.types import Channel, Chat
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 SUPORTE_USERNAME = os.getenv("SUPORTE_USERNAME", "LUCASLIMAMEI")
-PIX_EMAIL = os.getenv("PIX_EMAIL", "doufzoficial@gmail.com")
-SYNCPAY_CLIENT_ID = os.getenv("SYNCPAY_CLIENT_ID")
-SYNCPAY_CLIENT_SECRET = os.getenv("SYNCPAY_CLIENT_SECRET")
-SYNCPAY_BASE_URL = os.getenv("SYNCPAY_BASE_URL", "https://api.syncpayments.com.br")
 
 TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 
 DB = "database.db"
-MIN_INTERVAL_SECONDS = 30 * 60
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -59,6 +46,7 @@ PLANOS = {
     "p5d": {"nome": "5 dias (2 links)", "valor": Decimal("13.00"), "minutos": 7200},
     "prio1d": {"nome": "🚀 Prioritária 1 DIA", "valor": Decimal("30.00"), "minutos": 1440},
 }
+
 # =========================
 # BANCO DE DADOS
 # =========================
@@ -68,10 +56,6 @@ async def db_init():
         await db.execute("""CREATE TABLE IF NOT EXISTS users(
             user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
             trial_used INTEGER DEFAULT 0, expires_at TEXT
-        )""")
-        await db.execute("""CREATE TABLE IF NOT EXISTS orders(
-            order_id TEXT PRIMARY KEY, user_id INTEGER, plano_id TEXT, amount TEXT,
-            status TEXT, syncpay_id TEXT, pix_code TEXT, created_at TEXT
         )""")
         await db.execute("""CREATE TABLE IF NOT EXISTS tg_sessions(
             user_id INTEGER PRIMARY KEY, phone TEXT, session_string TEXT, connected_at TEXT
@@ -115,7 +99,7 @@ async def add_time(user_id: int, minutes: int):
                 old = datetime.datetime.fromisoformat(row[0])
                 if old > now:
                     base = old
-            except Exception:
+            except:
                 pass
         new_exp = base + datetime.timedelta(minutes=minutes)
         await db.execute("UPDATE users SET expires_at=? WHERE user_id=?", (new_exp.isoformat(), user_id))
@@ -131,35 +115,9 @@ async def is_active(user_id: int):
         return False
     try:
         return datetime.datetime.fromisoformat(row[0]) > datetime.datetime.utcnow()
-    except Exception:
+    except:
         return False
 
-
-# =========================
-# MENUS
-# =========================
-
-def main_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎁 RESGATAR 3 DIAS GRÁTIS", callback_data="trial")],
-        [InlineKeyboardButton(text="💎 VER PLANOS", callback_data="planos")],
-        [InlineKeyboardButton(text="⚙️ CONFIGURAR LOOP", callback_data="config_loop")],
-        [InlineKeyboardButton(text="👤 MEU PERFIL", callback_data="perfil")],
-        [InlineKeyboardButton(text="📖 COMO CONFIGURAR", url="https://t.me/aulasloopgram")],
-        [InlineKeyboardButton(text="📞 SUPORTE", url=f"https://t.me/{SUPORTE_USERNAME}")],
-    ])
-
-
-def config_kb():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔐 CONECTAR CONTA TELEGRAM", callback_data="connect_account")],
-        [InlineKeyboardButton(text="📢 MEUS GRUPOS/CANAIS", callback_data="my_chats")],
-        [InlineKeyboardButton(text="📝 DEFINIR MENSAGEM", callback_data="set_message")],
-        [InlineKeyboardButton(text="⏱️ DEFINIR INTERVALO", callback_data="set_interval")],
-        [InlineKeyboardButton(text="▶️ INICIAR LOOP", callback_data="start_loop")],
-        [InlineKeyboardButton(text="⏹️ PARAR LOOP", callback_data="stop_loop")],
-        [InlineKeyboardButton(text="⬅️ VOLTAR", callback_data="voltar")],
-    ])
 # =========================
 # TELETHON
 # =========================
@@ -193,22 +151,14 @@ async def save_temp_login(user_id: int, phone: str, phone_code_hash: str, temp_s
         await db.commit()
 
 
-async def get_temp_login(user_id: int):
-    async with aiosqlite.connect(DB) as db:
-        cur = await db.execute(
-            "SELECT phone, phone_code_hash, temp_session, created_at FROM temp_logins WHERE user_id=?",
-            (user_id,)
-        )
-        return await cur.fetchone()
-
-
 async def clear_temp_login(user_id: int):
     async with aiosqlite.connect(DB) as db:
         await db.execute("DELETE FROM temp_logins WHERE user_id=?", (user_id,))
         await db.commit()
 
+
 # =========================
-# LOOP DE DIVULGAÇÃO (NOVO)
+# LOOP DE DIVULGAÇÃO
 # =========================
 
 async def get_loop_config(user_id: int):
@@ -243,7 +193,7 @@ async def user_loop_task(user_id: int):
     while True:
         try:
             config = await get_loop_config(user_id)
-            if not config or config[2] != 1:  # running deve ser 1
+            if not config or config[2] != 1:
                 await asyncio.sleep(10)
                 continue
 
@@ -273,7 +223,7 @@ async def user_loop_task(user_id: int):
                 success = await send_loop_message(client, chat_id, message)
                 if success:
                     sent_count += 1
-                await asyncio.sleep(4)  # Delay maior para evitar flood
+                await asyncio.sleep(4)
 
             await client.disconnect()
             print(f"Loop usuário {user_id}: enviou em {sent_count}/{len(chats)} chats")
@@ -285,7 +235,20 @@ async def user_loop_task(user_id: int):
         except Exception as e:
             print(f"Erro no loop {user_id}: {e}")
             await asyncio.sleep(30)
-    
+
+# =========================
+# INICIAR LOOP DO USUÁRIO
+# =========================
+
+def start_user_loop(user_id: int):
+    """Inicia a task de divulgação automática"""
+    if user_id in USER_TASKS and not USER_TASKS[user_id].done():
+        return
+    task = asyncio.create_task(user_loop_task(user_id))
+    USER_TASKS[user_id] = task
+    print(f"✅ Loop iniciado para o usuário {user_id}")
+
+
 # =========================
 # LISTAR E GERENCIAR GRUPOS/CANAIS
 # =========================
@@ -327,14 +290,13 @@ async def my_chats_callback(c: CallbackQuery):
         return
 
     builder = InlineKeyboardBuilder()
-    for d in dialogs[:40]:  # limite para não ficar muito grande
+    for d in dialogs[:40]:
         emoji = "📢" if d["type"] == "channel" else "👥"
         builder.button(
             text=f"{emoji} {d['title'][:30]}",
             callback_data=f"toggle_chat_{d['chat_id']}"
         )
     builder.adjust(1)
-    
     builder.row(InlineKeyboardButton(text="✅ PRONTO / SALVAR", callback_data="chats_done"))
 
     await c.message.answer(
@@ -366,7 +328,6 @@ async def toggle_chat(c: CallbackQuery):
                 (c.from_user.id, chat_id, "Chat Selecionado")
             )
             await c.answer("✅ Adicionado", show_alert=True)
-        
         await db.commit()
 
 
@@ -423,9 +384,10 @@ async def login_phone_callback(c: CallbackQuery):
         "🔐 Envie seu número no formato internacional:\n\nExemplo: `+5521999999999`",
         parse_mode="Markdown"
     )
-    
+
+
 # =========================
-# MENSAGENS DE ESTADO (LOGIN + DEFINIR MENSAGEM)
+# MENSAGENS DE ESTADO
 # =========================
 
 @dp.message()
@@ -437,7 +399,6 @@ async def state_messages(m: Message):
 
     step = state.get("step")
 
-    # ====================== LOGIN - PASSO 1: TELEFONE ======================
     if step == "phone":
         phone = m.text.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         try:
@@ -460,24 +421,20 @@ async def state_messages(m: Message):
             }
 
             await m.answer(
-                "✅ Código enviado para o Telegram!\n\n"
-                "Envie o código no formato:\n"
-                "`loop12345`\n\n"
-                "Exemplo: `loop54213`",
+                "✅ Código enviado!\n\nEnvie no formato:\n`loop12345`\n\nExemplo: `loop54213`",
                 parse_mode="Markdown"
             )
         except Exception as e:
-            await m.answer(f"❌ Erro ao enviar código: {e}")
+            await m.answer(f"❌ Erro: {e}")
         return
 
-    # ====================== LOGIN - PASSO 2: CÓDIGO ======================
     if step == "code":
         text = m.text.strip()
         code = re.sub(r'(?i)^loop', '', text).strip()
         code = ''.join(filter(str.isdigit, code))
 
         if len(code) < 4:
-            await m.answer("❌ Código inválido.\nEnvie no formato: `loop12345`")
+            await m.answer("❌ Código inválido.")
             return
 
         phone = state.get("phone")
@@ -491,140 +448,64 @@ async def state_messages(m: Message):
             await clear_temp_login(user_id)
             LOGIN_STATE.pop(user_id, None)
 
-            # LOGIN BEM SUCEDIDO
             await m.answer(
-                "✅ **Conta conectada com sucesso!**\n\n"
-                "Agora configure seu loop de divulgação:\n"
-                "• Vá em ⚙️ CONFIGURAR LOOP\n"
-                "• Selecione seus grupos/canais\n"
-                "• Defina a mensagem",
+                "✅ **Conta conectada com sucesso!**\n\nAgora configure seu loop.",
                 parse_mode="Markdown",
                 reply_markup=config_kb()
             )
 
-            # Inicia loop se já estiver configurado
             config = await get_loop_config(user_id)
             if config and config[2] == 1:
                 start_user_loop(user_id)
 
         except Exception as e:
-            await m.answer(f"❌ Erro ao fazer login: {str(e)}")
+            await m.answer(f"❌ Erro ao fazer login: {e}")
         return
 
-    # ====================== DEFINIR MENSAGEM ======================
     if step == "set_message":
         message_text = m.text.strip()
         if len(message_text) < 3:
-            await m.answer("❌ Mensagem muito curta. Tente novamente.")
+            await m.answer("❌ Mensagem muito curta.")
             return
 
         async with aiosqlite.connect(DB) as db:
-            await db.execute(
-                "UPDATE loop_config SET message=? WHERE user_id=?",
-                (message_text, user_id)
-            )
+            await db.execute("UPDATE loop_config SET message=? WHERE user_id=?", (message_text, user_id))
             await db.commit()
 
         LOGIN_STATE.pop(user_id, None)
-        await m.answer("✅ **Mensagem salva com sucesso!**", reply_markup=config_kb())
+        await m.answer("✅ Mensagem salva!", reply_markup=config_kb())
         return
 
-
 # =========================
-# CALLBACKS (MENU FUNCIONANDO)
-# =========================
-
-# =========================
-# TRIAL DE 3 DIAS GRÁTIS
+# MENUS
 # =========================
 
-@dp.callback_query(F.data == "trial")
-async def trial(c: CallbackQuery):
-    await c.answer()
-    
-    async with aiosqlite.connect(DB) as db:
-        cur = await db.execute("SELECT trial_used FROM users WHERE user_id=?", (c.from_user.id,))
-        row = await cur.fetchone()
-        trial_used = row[0] if row else 0   # 0 = nunca usou
+def main_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎁 RESGATAR 3 DIAS GRÁTIS", callback_data="trial")],
+        [InlineKeyboardButton(text="💎 VER PLANOS", callback_data="planos")],
+        [InlineKeyboardButton(text="⚙️ CONFIGURAR LOOP", callback_data="config_loop")],
+        [InlineKeyboardButton(text="👤 MEU PERFIL", callback_data="perfil")],
+        [InlineKeyboardButton(text="📖 COMO CONFIGURAR", url="https://t.me/aulasloopgram")],
+        [InlineKeyboardButton(text="📞 SUPORTE", url=f"https://t.me/{SUPORTE_USERNAME}")],
+    ])
 
-    if trial_used == 1:
-        await c.message.answer("❌ Você já utilizou seu trial de 3 dias grátis.")
-        return
 
-    # Ativa o trial de 3 dias
-    await add_time(c.from_user.id, 3 * 1440)  # 3 dias = 4320 minutos
+def config_kb():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔐 CONECTAR CONTA TELEGRAM", callback_data="connect_account")],
+        [InlineKeyboardButton(text="📢 MEUS GRUPOS/CANAIS", callback_data="my_chats")],
+        [InlineKeyboardButton(text="📝 DEFINIR MENSAGEM", callback_data="set_message")],
+        [InlineKeyboardButton(text="⏱️ DEFINIR INTERVALO", callback_data="set_interval")],
+        [InlineKeyboardButton(text="▶️ INICIAR LOOP", callback_data="start_loop")],
+        [InlineKeyboardButton(text="⏹️ PARAR LOOP", callback_data="stop_loop")],
+        [InlineKeyboardButton(text="⬅️ VOLTAR", callback_data="voltar")],
+    ])
 
-    async with aiosqlite.connect(DB) as db:
-        await db.execute("UPDATE users SET trial_used=1 WHERE user_id=?", (c.from_user.id,))
-        await db.commit()
-
-    await c.message.answer(
-        "🎁 **Parabéns! Trial de 3 dias ativado com sucesso!**\n\n"
-        "✅ Sua conta está ativa até " + (await is_active(c.from_user.id) and "agora" or "verificar no perfil") + "\n\n"
-        "Agora vá em **⚙️ CONFIGURAR LOOP** para conectar sua conta e começar a divulgar.",
-        parse_mode="Markdown",
-        reply_markup=config_kb()
-    )
 
 # =========================
-# TECLADO DE PLANOS
+# CALLBACKS
 # =========================
-
-def planos_kb():
-    """Cria o teclado com os planos"""
-    builder = InlineKeyboardBuilder()
-    for plano_id, info in PLANOS.items():
-        builder.button(
-            text=f"{info['nome']} - R$ {float(info['valor'])}",
-            callback_data=f"comprar_{plano_id}"
-        )
-    builder.adjust(1)
-    builder.row(InlineKeyboardButton(text="⬅️ Voltar", callback_data="voltar"))
-    return builder.as_markup()
-
-
-@dp.callback_query(F.data == "planos")
-async def planos(c: CallbackQuery):
-    await c.answer()
-    await c.message.edit_text(
-        "💎 Escolha um plano abaixo:", 
-        reply_markup=planos_kb()
-    )
-    
-# ====================== FUNÇÃO DE PERFIL ======================
-async def profile_text(user_id: int):
-    """Retorna texto do perfil do usuário"""
-    active = await is_active(user_id)
-    config = await get_loop_config(user_id)
-    chats = await get_user_chats(user_id)
-    session_exists = await get_session(user_id) is not None
-    
-    status = "🟢 Ativo" if active else "🔴 Inativo (sem plano)"
-    loop_status = "▶️ Rodando" if (config and config[2] == 1) else "⏹️ Parado"
-    
-    return f"""👤 **Seu Perfil**
-
-**Status da Conta:** {status}
-**Loop de Divulgação:** {loop_status}
-**Grupos/Canais cadastrados:** {len(chats)}
-**Conta Telegram:** {'✅ Conectada' if session_exists else '❌ Não conectada'}
-
-💡 Use o menu "⚙️ CONFIGURAR LOOP" para gerenciar."""
-
-
-@dp.callback_query(F.data == "perfil")
-async def perfil(c: CallbackQuery):
-    await c.answer()
-    text = await profile_text(c.from_user.id)
-    await c.message.answer(text, parse_mode="Markdown")
-
-
-@dp.callback_query(F.data == "voltar")
-async def voltar(c: CallbackQuery):
-    await c.message.edit_text("Menu principal:", reply_markup=main_kb())
-
-
-# ====================== CALLBACK CONFIGURAR LOOP ======================
 
 @dp.callback_query(F.data == "config_loop")
 async def config_loop(c: CallbackQuery):
@@ -633,8 +514,7 @@ async def config_loop(c: CallbackQuery):
         "⚙️ **CONFIGURAR LOOP**\n\nEscolha uma opção abaixo:",
         reply_markup=config_kb()
     )
-    
-# ====================== CONFIGURAÇÃO DO LOOP ======================
+
 
 @dp.callback_query(F.data == "set_message")
 async def set_message_callback(c: CallbackQuery):
@@ -702,8 +582,84 @@ async def stop_loop(c: CallbackQuery):
 
     await c.message.answer("⏹️ Loop parado com sucesso.")
 
+@dp.callback_query(F.data == "trial")
+async def trial(c: CallbackQuery):
+    await c.answer()
+    
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT trial_used FROM users WHERE user_id=?", (c.from_user.id,))
+        row = await cur.fetchone()
+        trial_used = row[0] if row else 0
+
+    if trial_used == 1:
+        await c.message.answer("❌ Você já utilizou seu trial de 3 dias grátis.")
+        return
+
+    await add_time(c.from_user.id, 3 * 1440)
+
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("UPDATE users SET trial_used=1 WHERE user_id=?", (c.from_user.id,))
+        await db.commit()
+
+    await c.message.answer(
+        "🎁 **Trial de 3 dias ativado com sucesso!**\n\n"
+        "Agora vá em ⚙️ CONFIGURAR LOOP para começar.",
+        parse_mode="Markdown",
+        reply_markup=config_kb()
+    )
+
+
+@dp.callback_query(F.data == "perfil")
+async def perfil(c: CallbackQuery):
+    await c.answer()
+    text = await profile_text(c.from_user.id)
+    await c.message.answer(text, parse_mode="Markdown")
+
+
+async def profile_text(user_id: int):
+    active = await is_active(user_id)
+    config = await get_loop_config(user_id)
+    chats = await get_user_chats(user_id)
+    session_exists = await get_session(user_id) is not None
+    
+    status = "🟢 Ativo" if active else "🔴 Inativo"
+    loop_status = "▶️ Rodando" if (config and config[2] == 1) else "⏹️ Parado"
+    
+    return f"""👤 **Seu Perfil**
+
+**Status:** {status}
+**Loop:** {loop_status}
+**Grupos/Canais:** {len(chats)}
+**Conta Telegram:** {'✅ Conectada' if session_exists else '❌ Não conectada'}
+
+Use o menu para gerenciar."""
+
+
+@dp.callback_query(F.data == "voltar")
+async def voltar(c: CallbackQuery):
+    await c.message.edit_text("Menu principal:", reply_markup=main_kb())
+
+
+@dp.callback_query(F.data == "planos")
+async def planos(c: CallbackQuery):
+    await c.answer()
+    await c.message.edit_text("💎 Escolha um plano abaixo:", reply_markup=planos_kb())
+
+
+def planos_kb():
+    builder = InlineKeyboardBuilder()
+    for plano_id, info in PLANOS.items():
+        builder.button(
+            text=f"{info['nome']} - R$ {float(info['valor'])}",
+            callback_data=f"comprar_{plano_id}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="⬅️ Voltar", callback_data="voltar"))
+    return builder.as_markup()
+
+
 # =========================
-# PAINEL ADMINISTRADOR (COM SENHA)
+# PAINEL ADMINISTRADOR
 # =========================
 
 ADMIN_PASSWORD = "147147147"
@@ -727,15 +683,30 @@ async def admin_panel(m: Message):
         parse_mode="Markdown"
     )
 
+
+@dp.message(Command("adddias"))
+async def add_dias(m: Message):
+    try:
+        parts = m.text.strip().split()
+        user_id = int(parts[1])
+        dias = int(parts[2])
+        minutes = dias * 1440
+        new_exp = await add_time(user_id, minutes)
+        await m.answer(f"✅ Adicionado {dias} dias para o usuário {user_id}!", parse_mode="Markdown")
+    except:
+        await m.answer("❌ Uso: `/adddias ID_USUARIO DIAS`")
+
+
 # =========================
-# LOGIN QR CODE (Placeholder)
+# QR CODE PLACEHOLDER
 # =========================
 
 async def start_qr_login(user_id: int, message):
-    await message.answer("❌ Login por QR Code ainda não implementado.\nUse a opção 'Número + Código' por enquanto.")
+    await message.answer("❌ Login por QR Code ainda não implementado.\nUse a opção **Número + Código**.")
+
 
 # =========================
-# RUN (PARA RENDER)
+# RUN (FINAL)
 # =========================
 
 async def run_bot():
