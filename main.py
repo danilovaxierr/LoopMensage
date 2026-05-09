@@ -321,23 +321,37 @@ async def state_messages(m: Message):
 
 
 # =========================
-# CALLBACKS FALTANTES (IMPORTANTE)
+# CALLBACKS (MENU FUNCIONANDO)
 # =========================
+
+@dp.callback_query(F.data == "trial")
+async def trial(c: CallbackQuery):
+    await c.answer("🎁 Funcionalidade em breve!", show_alert=True)
+
 
 @dp.callback_query(F.data == "planos")
 async def planos(c: CallbackQuery):
-    await c.message.edit_text("💎 Escolha um plano:", reply_markup=planos_kb())
+    await c.message.edit_text("💎 Escolha um plano abaixo:", reply_markup=planos_kb())
+
 
 @dp.callback_query(F.data == "config_loop")
 async def config_loop(c: CallbackQuery):
     await c.message.edit_text(
-        "⚙️ Configurar Loop\n\nEscolha uma opção:",
+        "⚙️ CONFIGURAR LOOP MENSAGE\n\nEscolha uma opção abaixo:",
         reply_markup=config_kb()
     )
 
-@dp.callback_query(F.data == "trial")
-async def trial(c: CallbackQuery):
-    await c.answer("Em breve...", show_alert=True)
+
+@dp.callback_query(F.data == "perfil")
+async def perfil(c: CallbackQuery):
+    await c.answer()
+    await c.message.answer(await profile_text(c.from_user.id))
+
+
+@dp.callback_query(F.data == "voltar")
+async def voltar(c: CallbackQuery):
+    await c.message.edit_text("Menu principal:", reply_markup=main_kb())
+
 
 # =========================
 # RUN (PARA RENDER)
