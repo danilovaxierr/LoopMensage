@@ -421,8 +421,9 @@ async def login_phone_callback(c: CallbackQuery):
         "🔐 Envie seu número no formato internacional:\n\nExemplo: `+5521999999999`",
         parse_mode="Markdown"
     )
-    # =========================
-# MENSAGENS DE ESTADO (COM loop12345)
+    
+# =========================
+# MENSAGENS DE ESTADO (LOGIN + DEFINIR MENSAGEM)
 # =========================
 
 @dp.message()
@@ -434,6 +435,7 @@ async def state_messages(m: Message):
 
     step = state.get("step")
 
+    # ====================== LOGIN - PASSO 1: TELEFONE ======================
     if step == "phone":
         phone = m.text.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         try:
@@ -456,17 +458,18 @@ async def state_messages(m: Message):
             }
 
             await m.answer(
-                "✅ Código enviado!\n\n"
-                "Envie no formato:\n"
+                "✅ Código enviado para o Telegram!\n\n"
+                "Envie o código no formato:\n"
                 "`loop12345`\n\n"
                 "Exemplo: `loop54213`",
                 parse_mode="Markdown"
             )
         except Exception as e:
-            await m.answer(f"❌ Erro: {e}")
+            await m.answer(f"❌ Erro ao enviar código: {e}")
         return
 
-   if step == "code":
+    # ====================== LOGIN - PASSO 2: CÓDIGO ======================
+    if step == "code":
         text = m.text.strip()
         code = re.sub(r'(?i)^loop', '', text).strip()
         code = ''.join(filter(str.isdigit, code))
@@ -486,23 +489,18 @@ async def state_messages(m: Message):
             await clear_temp_login(user_id)
             LOGIN_STATE.pop(user_id, None)
 
-          # === LOGIN BEM SUCEDIDO ===
+            # LOGIN BEM SUCEDIDO
             await m.answer(
                 "✅ **Conta conectada com sucesso!**\n\n"
-                "Agora você pode configurar seu loop:\n"
-                "• Selecionar grupos e canais\n"
-                "• Definir a mensagem\n"
-                "• Iniciar divulgação automática",
+                "Agora configure seu loop de divulgação:\n"
+                "• Vá em ⚙️ CONFIGURAR LOOP\n"
+                "• Selecione seus grupos/canais\n"
+                "• Defina a mensagem",
                 parse_mode="Markdown",
                 reply_markup=config_kb()
             )
 
-            # Inicia o loop automaticamente se já estiver configurado
-            config = await get_loop_config(user_id)
-            if config and config[2] == 1:
-                start_user_loop(user_id)
-
-            # Inicia loop automaticamente se já estiver configurado como running
+            # Inicia loop se já estiver configurado
             config = await get_loop_config(user_id)
             if config and config[2] == 1:
                 start_user_loop(user_id)
@@ -511,7 +509,7 @@ async def state_messages(m: Message):
             await m.answer(f"❌ Erro ao fazer login: {str(e)}")
         return
 
-    # === NOVA PARTE - Definir Mensagem ===
+    # ====================== DEFINIR MENSAGEM ======================
     if step == "set_message":
         message_text = m.text.strip()
         if len(message_text) < 3:
