@@ -268,8 +268,10 @@ async def voltar(c: CallbackQuery):
 # =========================
 async def run_bot():
     await db_init()
-    await dp.start_polling(bot)
-
+    # Para evitar conflito ao reiniciar no Render
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot, skip_updates=True)
+    
 async def run_api():
     config = uvicorn.Config(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")), log_level="info")
     server = uvicorn.Server(config)
