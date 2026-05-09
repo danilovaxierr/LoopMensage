@@ -693,44 +693,78 @@ async def stop_loop(c: CallbackQuery):
 # PAINEL ADMINISTRADOR
 # =========================
 
-ADMIN_PASSWORD = "147147147"
-
 @dp.message(Command("admin"))
-async def admin_command(m: Message):
+async def admin_panel(m: Message):
     if m.from_user.id != ADMIN_ID:
-        await m.answer("❌ Acesso negado.")
+        await m.answer("❌ Você não tem permissão.")
         return
-    
+   
     await m.answer(
-        "🔑 **Painel Administrativo**\n\n"
-        "Envie: `/adddias ID_DO_USUARIO QUANTIDADE_DIAS`",
+        "🔐 **PAINEL ADMINISTRATIVO**\n\n"
+        "Comandos disponíveis:\n\n"
+        "`/adddias ID_USUARIO DIAS`\n"
+        "Exemplo: `/adddias 123456789 30`\n\n"
+        "`/status ID_USUARIO` - Ver informações do usuário",
         parse_mode="Markdown"
     )
 
 
 @dp.message(Command("adddias"))
-async def add_dias_command(m: Message):
+async def add_dias(m: Message):
     if m.from_user.id != ADMIN_ID:
         return
-    
+   
     try:
-        _, user_id, dias = m.text.split()
-        user_id = int(user_id)
-        dias = int(dias)
-        
-        minutes = dias * 1440  # 1 dia = 1440 minutos
-        
+        parts = m.text.strip().split()
+        if len(parts) < 3:
+            raise ValueError
+           
+        user_id = int(parts[1])
+        dias = int(parts[2])
+       
+        minutes = dias * 1440
+       
         new_exp = await add_time(user_id, minutes)
-        
+       
         await m.answer(
-            f"✅ **Adicionado com sucesso!**\n\n"
+            f"✅ **Sucesso!**\n\n"
             f"Usuário: `{user_id}`\n"
-            f"Dias adicionados: {dias}\n"
-            f"Nova expiração: {new_exp.date()}",
+            f"Dias adicionados: **{dias}**\n"
+            f"Expiração: `{new_exp}`",
+            parse_mode="Markdown"
+        )
+       
+    except:
+        await m.answer("❌ Uso correto:\n`/adddias ID_DO_USUARIO QUANTIDADE_DE_DIAS`")
+
+
+@dp.message(Command("status"))
+async def user_status(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        return
+   
+    try:
+        user_id = int(m.text.split()[1])
+       
+        active = await is_active(user_id)
+        session = await get_session(user_id)
+        chats = await get_user_chats(user_id)
+        config = await get_loop_config(user_id)
+       
+        status = "🟢 ATIVO" if active else "🔴 INATIVO"
+        loop_status = "▶️ RODANDO" if config and config[2] == 1 else "⏹️ PARADO"
+       
+        await m.answer(
+            f"👤 **Status do Usuário**\n\n"
+            f"ID: `{user_id}`\n"
+            f"Status: **{status}**\n"
+            f"Loop: {loop_status}\n"
+            f"Grupos/Canais: {len(chats)}\n"
+            f"Conta TG: {'✅ Conectada' if session else '❌ Não conectada'}",
             parse_mode="Markdown"
         )
     except:
-        await m.answer("❌ Uso correto:\n`/adddias ID_DO_USUARIO QUANTIDADE_DIAS`")
+        await m.answer("❌ Uso: `/status ID_DO_USUARIO`")
 
 # =========================
 # RUN (PARA RENDER)
