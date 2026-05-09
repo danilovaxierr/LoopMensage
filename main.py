@@ -713,7 +713,7 @@ async def admin_panel(m: Message):
     try:
         senha = m.text.strip().split()[1]
         if senha != ADMIN_PASSWORD:
-            await m.answer("❌ Senha incorreta!")
+            await m.answer("❌ Senha incorreta!\n\nUse: `/admin 147147147`")
             return
     except:
         await m.answer("❌ Use: `/admin 147147147`")
@@ -721,11 +721,18 @@ async def admin_panel(m: Message):
 
     await m.answer(
         "✅ **PAINEL ADMIN LIBERADO**\n\n"
-        "Comandos:\n"
-        "`/adddias ID_USUARIO DIAS`\n"
-        "`/status ID_USUARIO`",
+        "🔹 `/adddias ID_USUARIO DIAS`\n"
+        "🔹 `/status ID_USUARIO`\n\n"
+        "Exemplo: `/adddias 123456789 999`",
         parse_mode="Markdown"
     )
+
+# =========================
+# LOGIN QR CODE (Placeholder)
+# =========================
+
+async def start_qr_login(user_id: int, message):
+    await message.answer("❌ Login por QR Code ainda não implementado.\nUse a opção 'Número + Código' por enquanto.")
 
 # =========================
 # RUN (PARA RENDER)
