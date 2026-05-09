@@ -283,6 +283,101 @@ def start_user_loop(user_id: int):
         return
     task = asyncio.create_task(user_loop_task(user_id))
     USER_TASKS[user_id] = task
+    
+# =========================
+# LISTAR E GERENCIAR GRUPOS/CANAIS
+# =========================
+
+async def get_user_dialogs(user_id: int):
+    """Pega todos os grupos e canais do usuário"""
+    session_string = await get_session(user_id)
+    if not session_string:
+        return []
+
+    client = make_client(session_string)
+    await client.connect()
+    
+    dialogs = []
+    try:
+        async for dialog in client.iter_dialogs(limit=100):
+            if (dialog.is_group or dialog.is_channel) and not dialog.is_user:
+                dialogs.append({
+                    "chat_id": dialog.id,
+                    "title": dialog.title or "Sem título",
+                    "type": "channel" if dialog.is_channel else "group"
+                })
+    except Exception as e:
+        print(f"Erro ao listar diálogos do usuário {user_id}: {e}")
+    finally:
+        await client.disconnect()
+    
+    return dialogs
+
+
+@dp.callback_query(F.data == "my_chats")
+async def my_chats_callback(c: CallbackQuery):
+    await c.answer("🔄 Carregando seus grupos e canais...")
+    
+    dialogs = await get_user_dialogs(c.from_user.id)
+    
+    if not dialogs:
+        await c.message.answer("❌ Nenhum grupo ou canal encontrado.\nVerifique se sua conta está conectada.")
+        return
+
+    builder = InlineKeyboardBuilder()
+    for d in dialogs[:40]:  # limite para não ficar muito grande
+        emoji = "📢" if d["type"] == "channel" else "👥"
+        builder.button(
+            text=f"{emoji} {d['title'][:30]}",
+            callback_data=f"toggle_chat_{d['chat_id']}"
+        )
+    builder.adjust(1)
+    
+    builder.row(InlineKeyboardButton(text="✅ PRONTO / SALVAR", callback_data="chats_done"))
+
+    await c.message.answer(
+        f"✅ **Seus Grupos e Canais** ({len(dialogs)} encontrados)\n\n"
+        "Clique nos que você quer divulgar sua mensagem:",
+        reply_markup=builder.as_markup()
+    )
+
+
+@dp.callback_query(F.data.startswith("toggle_chat_"))
+async def toggle_chat(c: CallbackQuery):
+    await c.answer()
+    chat_id = int(c.data.split("_")[2])
+    
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT 1 FROM loop_chats WHERE user_id=? AND chat_id=?", 
+            (c.from_user.id, chat_id)
+        )
+        exists = await cur.fetchone()
+        
+        if exists:
+            await db.execute("DELETE FROM loop_chats WHERE user_id=? AND chat_id=?", 
+                           (c.from_user.id, chat_id))
+            await c.answer("❌ Removido", show_alert=True)
+        else:
+            await db.execute(
+                "INSERT OR REPLACE INTO loop_chats(user_id, chat_id, title) VALUES(?,?,?)",
+                (c.from_user.id, chat_id, "Chat Selecionado")
+            )
+            await c.answer("✅ Adicionado", show_alert=True)
+        
+        await db.commit()
+
+
+@dp.callback_query(F.data == "chats_done")
+async def chats_done(c: CallbackQuery):
+    await c.answer()
+    chats_count = len(await get_user_chats(c.from_user.id))
+    await c.message.edit_text(
+        f"✅ **Configuração salva!**\n\n"
+        f"Você irá divulgar em **{chats_count}** grupos/canais.\n\n"
+        "Agora defina sua mensagem e inicie o loop.",
+        reply_markup=config_kb()
+    )
 
 # =========================
 # HANDLERS PRINCIPAIS
@@ -391,7 +486,21 @@ async def state_messages(m: Message):
             await clear_temp_login(user_id)
             LOGIN_STATE.pop(user_id, None)
 
-            await m.answer("✅ **Conta conectada com sucesso!**\n\nAgora configure sua mensagem e grupos.", parse_mode="Markdown")
+          # === LOGIN BEM SUCEDIDO ===
+            await m.answer(
+                "✅ **Conta conectada com sucesso!**\n\n"
+                "Agora você pode configurar seu loop:\n"
+                "• Selecionar grupos e canais\n"
+                "• Definir a mensagem\n"
+                "• Iniciar divulgação automática",
+                parse_mode="Markdown",
+                reply_markup=config_kb()
+            )
+
+            # Inicia o loop automaticamente se já estiver configurado
+            config = await get_loop_config(user_id)
+            if config and config[2] == 1:
+                start_user_loop(user_id)
 
             # Inicia loop automaticamente se já estiver configurado como running
             config = await get_loop_config(user_id)
@@ -443,10 +552,32 @@ async def config_loop(c: CallbackQuery):
     )
 
 
+# ====================== FUNÇÃO DE PERFIL ======================
+async def profile_text(user_id: int):
+    """Retorna texto do perfil do usuário"""
+    active = await is_active(user_id)
+    config = await get_loop_config(user_id)
+    chats = await get_user_chats(user_id)
+    session_exists = await get_session(user_id) is not None
+    
+    status = "🟢 Ativo" if active else "🔴 Inativo (sem plano)"
+    loop_status = "▶️ Rodando" if (config and config[2] == 1) else "⏹️ Parado"
+    
+    return f"""👤 **Seu Perfil**
+
+**Status da Conta:** {status}
+**Loop de Divulgação:** {loop_status}
+**Grupos/Canais cadastrados:** {len(chats)}
+**Conta Telegram:** {'✅ Conectada' if session_exists else '❌ Não conectada'}
+
+💡 Use o menu "⚙️ CONFIGURAR LOOP" para gerenciar."""
+
+
 @dp.callback_query(F.data == "perfil")
 async def perfil(c: CallbackQuery):
     await c.answer()
-    await c.message.answer(await profile_text(c.from_user.id))
+    text = await profile_text(c.from_user.id)
+    await c.message.answer(text, parse_mode="Markdown")
 
 
 @dp.callback_query(F.data == "voltar")
