@@ -210,17 +210,21 @@ async def save_session(user_id: int, phone: str, session_string: str):
 async def start(m: Message):
     await ensure_user(m)
     args = m.text.split()[1:] if len(m.text.split()) > 1 else []
+
     if args:
         code = args[0].strip()
         if code.startswith("loop"):
             await redeem_referral_code(m, code)
             return
 
+    # Menu com botões
     await m.answer(
-        "👋 Olá! Seja bem-vindo(a) ao Loop Mensage!\n\n"
-        "Automação inteligente para divulgação no Telegram.",
-        reply_markup=main_kb()
-    )
+        "👋 Olá! Seja bem-vindo(a) ao **Loop Mensage**!\n\n"
+        "Automação inteligente para divulgação no Telegram.\n\n"
+        "Escolha uma opção abaixo:",
+        reply_markup=main_kb(),
+        parse_mode="Markdown"
+    ))
 
 @dp.callback_query(F.data == "my_referral")
 async def my_referral(c: CallbackQuery):
@@ -251,8 +255,11 @@ async def my_referral(c: CallbackQuery):
 
 @dp.callback_query(F.data == "voltar")
 async def voltar(c: CallbackQuery):
-    await c.message.edit_text("Menu principal:", reply_markup=main_kb())
-
+    await c.answer()
+    await c.message.edit_text(
+        "👋 Menu Principal\n\nEscolha uma opção abaixo:",
+        reply_markup=main_kb()
+    )
 # ... (coloque todo o resto aqui: perfil, trial, planos, config_loop, connect_account, etc.)
 
 # =========================
