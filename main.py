@@ -15,6 +15,7 @@ from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError, PhoneCodeInvalidError, PhoneNumberInvalidError, PhoneCodeExpiredError
 from telethon.tl.types import Channel, Chat
+import re   # ← ADICIONE ESTA LINHA AQUI
 
 load_dotenv()
 
@@ -606,17 +607,15 @@ async def stop_loop(c: CallbackQuery):
 async def state_messages(m: Message):
     user_id = m.from_user.id
     state = LOGIN_STATE.get(user_id)
-
     if not state:
         return
 
     step = state.get("step")
 
+    # ====================== PHONE ======================
     if step == "phone":
         phone = m.text.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         try:
-            # Mantém o MESMO client vivo na memória até o usuário mandar o código.
-            # Isso evita o erro "The confirmation code has expired" causado por trocar sessão/client.
             old_client = state.get("client")
             if old_client:
                 try:
@@ -628,7 +627,6 @@ async def state_messages(m: Message):
             await client.connect()
             sent = await client.send_code_request(phone)
 
-            # Salva também no banco como backup, mas o login principal usa o client em memória.
             await save_temp_login(
                 user_id=user_id,
                 phone=phone,
@@ -645,41 +643,41 @@ async def state_messages(m: Message):
             }
 
             await m.answer(
-                "✅ Código enviado para seu Telegram.\n\n"
-                "Envie o código MAIS RECENTE aqui.\n"
-                "Exemplo: 12345\n\n"
-                "⚠️ Não aperte conectar de novo antes de enviar o código."
+                "✅ Código enviado para o Telegram!\n\n"
+                "Envie aqui no formato:\n"
+                "`loop12345`\n\n"
+                "Exemplo: `loop54213`\n\n"
+                "⚠️ Use apenas o código mais recente.",
+                parse_mode="Markdown"
             )
         except PhoneNumberInvalidError:
-            await m.answer("❌ Número inválido. Use formato internacional, exemplo: +5521999999999")
+            await m.answer("❌ Número inválido. Use +55 seguido do DDD e número.")
         except Exception as e:
             await m.answer(f"❌ Erro ao enviar código: {e}")
         return
 
-        if step == "code":
+    # ====================== CODE ======================
+    if step == "code":
         text = m.text.strip()
         
-        # Remove "loop" ou "Loop" ou "LOOP" se a pessoa mandar
+        # Remove "loop" e pega apenas números
         code = re.sub(r'(?i)^loop', '', text).strip()
-        code = re.sub(r'\s+', '', code)  # remove espaços
-        
-        # Pega só os números (segurança)
+        code = re.sub(r'\s+', '', code)
         code = ''.join(filter(str.isdigit, code))
-        
+
         if len(code) < 4 or len(code) > 10:
-            await m.answer("❌ Código inválido. Envie no formato:\n\n`loop12345`", parse_mode="Markdown")
+            await m.answer("❌ Código inválido.\n\nEnvie no formato:\n`loop12345`", parse_mode="Markdown")
             return
 
         phone = state.get("phone")
         phone_code_hash = state.get("phone_code_hash")
         client = state.get("client")
 
-        # Fallback caso o bot tenha reiniciado
         if not phone or not phone_code_hash or not client:
             temp = await get_temp_login(user_id)
             if not temp:
                 LOGIN_STATE.pop(user_id, None)
-                await m.answer("❌ Sessão expirada. Clique em CONECTAR CONTA novamente.")
+                await m.answer("❌ Login expirou. Clique em CONECTAR CONTA novamente.")
                 return
             phone, phone_code_hash, temp_session, _ = temp
             client = make_client(temp_session or "")
@@ -701,22 +699,19 @@ async def state_messages(m: Message):
             
             try:
                 await client.disconnect()
-            except:
+            except Exception:
                 pass
 
             LOGIN_STATE.pop(user_id, None)
             await m.answer(
-                "✅ **Conta conectada com sucesso!**\n\n"
-                "Agora vá em:\n"
-                "📢 MEUS GRUPOS/CANAIS\n"
-                "e selecione onde você é admin.",
-                parse_mode="Markdown"
+                "✅ Conta conectada com sucesso!\n\n"
+                "Agora vá em:\n📢 MEUS GRUPOS/CANAIS\ne selecione onde você é admin."
             )
 
         except PhoneCodeExpiredError:
             await clear_temp_login(user_id)
             LOGIN_STATE[user_id] = {"step": "phone"}
-            await m.answer("❌ Esse código expirou.\nEnvie seu número novamente.")
+            await m.answer("❌ Código expirou.\nEnvie seu número novamente.")
 
         except PhoneCodeInvalidError:
             await m.answer("❌ Código incorreto. Tente novamente.")
@@ -727,13 +722,13 @@ async def state_messages(m: Message):
                 "phone": phone,
                 "client": client
             }
-            await m.answer("🔐 Sua conta tem senha de 2FA.\nEnvie sua senha agora.")
+            await m.answer("🔐 Sua conta tem senha 2FA.\nEnvie sua senha agora.")
 
         except Exception as e:
             await m.answer(f"❌ Erro ao confirmar código: {e}")
-        
         return
 
+    # ====================== PASSWORD ======================
     if step == "password":
         password = m.text.strip()
         phone = state.get("phone")
@@ -743,51 +738,38 @@ async def state_messages(m: Message):
             temp = await get_temp_login(user_id)
             if not temp:
                 LOGIN_STATE.pop(user_id, None)
-                await m.answer("❌ Login expirou. Conecte a conta novamente.")
+                await m.answer("❌ Login expirou.")
                 return
-            phone, phone_code_hash, temp_session, created_at = temp
+            phone, phone_code_hash, temp_session, _ = temp
             client = make_client(temp_session or "")
             await client.connect()
 
         try:
             if not client.is_connected():
                 await client.connect()
-
             await client.sign_in(password=password)
             session_string = client.session.save()
             await save_session(user_id, phone or "", session_string)
             await clear_temp_login(user_id)
-
             try:
                 await client.disconnect()
             except Exception:
                 pass
-
             LOGIN_STATE.pop(user_id, None)
-            await m.answer(
-                "✅ Conta conectada com sucesso!\n\n"
-                "Agora vá em:\n"
-                "📢 MEUS GRUPOS/CANAIS\n"
-                "e selecione onde você é admin."
-            )
+            await m.answer("✅ Conta conectada com sucesso!")
         except Exception as e:
-            await m.answer(f"❌ Senha 2FA inválida ou erro no login: {e}")
+            await m.answer(f"❌ Senha inválida: {e}")
         return
 
+    # ====================== OUTROS ======================
     if step == "set_message":
         text = m.text.strip()
         if len(text) < 3:
             await m.answer("❌ Mensagem muito curta.")
             return
-
         async with aiosqlite.connect(DB) as db:
-            await db.execute(
-                "INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)",
-                (user_id, 3600, 0)
-            )
             await db.execute("UPDATE loop_config SET message=? WHERE user_id=?", (text, user_id))
             await db.commit()
-
         LOGIN_STATE.pop(user_id, None)
         await m.answer("✅ Mensagem salva.")
         return
@@ -795,23 +777,16 @@ async def state_messages(m: Message):
     if step == "set_interval":
         try:
             minutes = int(m.text.strip())
-        except Exception:
-            await m.answer("❌ Envie só o número em minutos. Exemplo: 60")
+        except:
+            await m.answer("❌ Envie apenas o número em minutos.")
             return
-
         seconds = minutes * 60
         if seconds < MIN_INTERVAL_SECONDS:
-            await m.answer("❌ Intervalo mínimo é 30 minutos.")
+            await m.answer("❌ Mínimo 30 minutos.")
             return
-
         async with aiosqlite.connect(DB) as db:
-            await db.execute(
-                "INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)",
-                (user_id, 3600, 0)
-            )
             await db.execute("UPDATE loop_config SET interval_seconds=? WHERE user_id=?", (seconds, user_id))
             await db.commit()
-
         LOGIN_STATE.pop(user_id, None)
         await m.answer(f"✅ Intervalo salvo: {minutes} minutos.")
         return
