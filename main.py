@@ -59,10 +59,10 @@ PLANOS = {
     "p5d": {"nome": "5 dias (2 links)", "valor": Decimal("13.00"), "minutos": 7200},
     "prio1d": {"nome": "🚀 Prioritária 1 DIA", "valor": Decimal("30.00"), "minutos": 1440},
 }
+# =========================
+# BANCO DE DADOS
+# =========================
 
-# =========================
-# BANCO
-# =========================
 async def db_init():
     async with aiosqlite.connect(DB) as db:
         await db.execute("""CREATE TABLE IF NOT EXISTS users(
@@ -90,11 +90,19 @@ async def db_init():
         )""")
         await db.commit()
 
+
 async def ensure_user(m: Message):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR IGNORE INTO users(user_id, username, first_name) VALUES(?,?,?)", (m.from_user.id, m.from_user.username, m.from_user.first_name))
-        await db.execute("INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)", (m.from_user.id, 3600, 0))
+        await db.execute(
+            "INSERT OR IGNORE INTO users(user_id, username, first_name) VALUES(?,?,?)",
+            (m.from_user.id, m.from_user.username, m.from_user.first_name)
+        )
+        await db.execute(
+            "INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)",
+            (m.from_user.id, 3600, 0)
+        )
         await db.commit()
+
 
 async def add_time(user_id: int, minutes: int):
     now = datetime.datetime.utcnow()
@@ -107,12 +115,13 @@ async def add_time(user_id: int, minutes: int):
                 old = datetime.datetime.fromisoformat(row[0])
                 if old > now:
                     base = old
-            except:
+            except Exception:
                 pass
         new_exp = base + datetime.timedelta(minutes=minutes)
         await db.execute("UPDATE users SET expires_at=? WHERE user_id=?", (new_exp.isoformat(), user_id))
         await db.commit()
         return new_exp
+
 
 async def is_active(user_id: int):
     async with aiosqlite.connect(DB) as db:
@@ -122,12 +131,14 @@ async def is_active(user_id: int):
         return False
     try:
         return datetime.datetime.fromisoformat(row[0]) > datetime.datetime.utcnow()
-    except:
+    except Exception:
         return False
+
 
 # =========================
 # MENUS
 # =========================
+
 def main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎁 RESGATAR 3 DIAS GRÁTIS", callback_data="trial")],
@@ -137,6 +148,7 @@ def main_kb():
         [InlineKeyboardButton(text="📖 COMO CONFIGURAR", url="https://t.me/aulasloopgram")],
         [InlineKeyboardButton(text="📞 SUPORTE", url=f"https://t.me/{SUPORTE_USERNAME}")],
     ])
+
 
 def config_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -148,14 +160,13 @@ def config_kb():
         [InlineKeyboardButton(text="⏹️ PARAR LOOP", callback_data="stop_loop")],
         [InlineKeyboardButton(text="⬅️ VOLTAR", callback_data="voltar")],
     ])
-
-# =========================
+    # =========================
 # TELETHON
 # =========================
+
 def make_client(session_string: str = ""):
     return TelegramClient(StringSession(session_string), TELEGRAM_API_ID, TELEGRAM_API_HASH)
 
-# (Cole aqui sua função start_qr_login completa se quiser manter)
 
 async def get_session(user_id: int):
     async with aiosqlite.connect(DB) as db:
@@ -163,35 +174,52 @@ async def get_session(user_id: int):
         row = await cur.fetchone()
     return row[0] if row else None
 
+
 async def save_session(user_id: int, phone: str, session_string: str):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR REPLACE INTO tg_sessions(user_id, phone, session_string, connected_at) VALUES(?,?,?,?)",
-                        (user_id, phone, session_string, datetime.datetime.utcnow().isoformat()))
+        await db.execute(
+            "INSERT OR REPLACE INTO tg_sessions(user_id, phone, session_string, connected_at) VALUES(?,?,?,?)",
+            (user_id, phone, session_string, datetime.datetime.utcnow().isoformat())
+        )
         await db.commit()
+
 
 async def save_temp_login(user_id: int, phone: str, phone_code_hash: str, temp_session: str):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR REPLACE INTO temp_logins(user_id, phone, phone_code_hash, temp_session, created_at) VALUES(?,?,?,?,?)",
-                        (user_id, phone, phone_code_hash, temp_session, datetime.datetime.utcnow().isoformat()))
+        await db.execute(
+            "INSERT OR REPLACE INTO temp_logins(user_id, phone, phone_code_hash, temp_session, created_at) VALUES(?,?,?,?,?)",
+            (user_id, phone, phone_code_hash, temp_session, datetime.datetime.utcnow().isoformat())
+        )
         await db.commit()
+
 
 async def get_temp_login(user_id: int):
     async with aiosqlite.connect(DB) as db:
-        cur = await db.execute("SELECT phone, phone_code_hash, temp_session, created_at FROM temp_logins WHERE user_id=?", (user_id,))
+        cur = await db.execute(
+            "SELECT phone, phone_code_hash, temp_session, created_at FROM temp_logins WHERE user_id=?",
+            (user_id,)
+        )
         return await cur.fetchone()
+
 
 async def clear_temp_login(user_id: int):
     async with aiosqlite.connect(DB) as db:
         await db.execute("DELETE FROM temp_logins WHERE user_id=?", (user_id,))
         await db.commit()
 
+
 # =========================
-# HANDLERS
+# HANDLERS PRINCIPAIS
 # =========================
+
 @dp.message(Command("start"))
 async def start(m: Message):
     await ensure_user(m)
-    await m.answer("👋 Bem-vindo ao Loop Mensage!", reply_markup=main_kb())
+    await m.answer(
+        "👋 Olá! Seja bem-vindo ao Loop Mensage!",
+        reply_markup=main_kb()
+    )
+
 
 @dp.callback_query(F.data == "connect_account")
 async def connect_account(c: CallbackQuery):
@@ -199,11 +227,13 @@ async def connect_account(c: CallbackQuery):
     if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
         await c.message.answer("❌ TELEGRAM_API_ID ou TELEGRAM_API_HASH não configurado.")
         return
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📱 QR Code (Recomendado)", callback_data="login_qr")],
         [InlineKeyboardButton(text="📞 Número + Código", callback_data="login_phone")]
     ])
     await c.message.answer("🔐 Escolha o método de login:", reply_markup=kb)
+
 
 @dp.callback_query(F.data == "login_qr")
 async def login_qr_callback(c: CallbackQuery):
@@ -211,89 +241,194 @@ async def login_qr_callback(c: CallbackQuery):
     await c.message.answer("🔐 Gerando QR Code...")
     await start_qr_login(c.from_user.id, c.message)
 
+
 @dp.callback_query(F.data == "login_phone")
 async def login_phone_callback(c: CallbackQuery):
     await c.answer()
     LOGIN_STATE[c.from_user.id] = {"step": "phone"}
-    await c.message.answer("🔐 Envie seu número internacional.\nExemplo: +5521999999999", parse_mode="Markdown")
-
-# =========================
+    await c.message.answer(
+        "🔐 Envie seu número no formato internacional:\n\nExemplo: `+5521999999999`",
+        parse_mode="Markdown"
+    )
+    # =========================
 # MENSAGENS DE ESTADO (COM loop12345)
 # =========================
+
 @dp.message()
 async def state_messages(m: Message):
     user_id = m.from_user.id
     state = LOGIN_STATE.get(user_id)
     if not state:
         return
+
     step = state.get("step")
 
     if step == "phone":
         phone = m.text.strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
         try:
+            old_client = state.get("client")
+            if old_client:
+                try:
+                    await old_client.disconnect()
+                except Exception:
+                    pass
+
             client = make_client()
             await client.connect()
             sent = await client.send_code_request(phone)
 
-            await save_temp_login(user_id, phone, sent.phone_code_hash, client.session.save())
+            await save_temp_login(
+                user_id=user_id,
+                phone=phone,
+                phone_code_hash=sent.phone_code_hash,
+                temp_session=client.session.save()
+            )
 
             LOGIN_STATE[user_id] = {
                 "step": "code",
                 "phone": phone,
                 "phone_code_hash": sent.phone_code_hash,
-                "client": client
+                "client": client,
+                "created_at": datetime.datetime.utcnow().isoformat()
             }
-            await m.answer("✅ Código enviado!\n\nEnvie no formato:\n`loop12345`", parse_mode="Markdown")
+
+            await m.answer(
+                "✅ Código enviado para o Telegram!\n\n"
+                "Envie no formato:\n"
+                "`loop12345`\n\n"
+                "Exemplo: `loop54213`",
+                parse_mode="Markdown"
+            )
+        except PhoneNumberInvalidError:
+            await m.answer("❌ Número inválido. Use +55 seguido do número.")
+        except FloodWaitError as e:
+            await m.answer(f"⏳ Aguarde {e.seconds} segundos antes de tentar novamente.")
         except Exception as e:
-            await m.answer(f"❌ Erro: {e}")
+            await m.answer(f"❌ Erro ao enviar código: {e}")
         return
 
     if step == "code":
         text = m.text.strip()
         code = re.sub(r'(?i)^loop', '', text).strip()
+        code = re.sub(r'\s+', '', code)
         code = ''.join(filter(str.isdigit, code))
 
-        if len(code) < 4:
-            await m.answer("❌ Código inválido.\nEnvie: `loop12345`")
+        if len(code) < 4 or len(code) > 10:
+            await m.answer("❌ Código inválido.\n\nEnvie no formato:\n`loop12345`", parse_mode="Markdown")
             return
 
         phone = state.get("phone")
         phone_code_hash = state.get("phone_code_hash")
         client = state.get("client")
 
+        if not phone or not phone_code_hash or not client:
+            temp = await get_temp_login(user_id)
+            if not temp:
+                LOGIN_STATE.pop(user_id, None)
+                await m.answer("❌ Login expirou. Tente novamente.")
+                return
+            phone, phone_code_hash, temp_session, _ = temp
+            client = make_client(temp_session or "")
+            await client.connect()
+
         try:
-            await client.sign_in(phone=phone, code=code, phone_code_hash=phone_code_hash)
-            await save_session(user_id, phone, client.session.save())
+            if not client.is_connected():
+                await client.connect()
+
+            await client.sign_in(
+                phone=phone,
+                code=code,
+                phone_code_hash=phone_code_hash
+            )
+
+            session_string = client.session.save()
+            await save_session(user_id, phone, session_string)
             await clear_temp_login(user_id)
+
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
             LOGIN_STATE.pop(user_id, None)
-            await m.answer("✅ Conta conectada com sucesso!\n\nVá em 📢 MEUS GRUPOS/CANAIS")
+            await m.answer(
+                "✅ Conta conectada com sucesso!\n\n"
+                "Agora vá em:\n📢 MEUS GRUPOS/CANAIS"
+            )
+
         except PhoneCodeExpiredError:
-            await m.answer("❌ Código expirou.")
+            await clear_temp_login(user_id)
             LOGIN_STATE[user_id] = {"step": "phone"}
+            await m.answer("❌ Código expirou.\nEnvie seu número novamente.")
         except PhoneCodeInvalidError:
-            await m.answer("❌ Código incorreto.")
+            await m.answer("❌ Código incorreto. Tente novamente.")
         except SessionPasswordNeededError:
-            LOGIN_STATE[user_id] = {"step": "password", "client": client}
-            await m.answer("🔐 Envie sua senha 2FA.")
+            LOGIN_STATE[user_id] = {"step": "password", "phone": phone, "client": client}
+            await m.answer("🔐 Sua conta tem senha 2FA.\nEnvie sua senha agora.")
         except Exception as e:
-            await m.answer(f"❌ Erro: {e}")
+            await m.answer(f"❌ Erro ao confirmar código: {e}")
         return
 
     if step == "password":
-        # Adicione aqui o código de senha se precisar
-        pass
+        password = m.text.strip()
+        phone = state.get("phone")
+        client = state.get("client")
+
+        if not client:
+            await m.answer("❌ Sessão expirada.")
+            return
+
+        try:
+            if not client.is_connected():
+                await client.connect()
+            await client.sign_in(password=password)
+            session_string = client.session.save()
+            await save_session(user_id, phone or "", session_string)
+            await clear_temp_login(user_id)
+            LOGIN_STATE.pop(user_id, None)
+            await m.answer("✅ Conta conectada com sucesso!")
+        except Exception as e:
+            await m.answer(f"❌ Senha inválida: {e}")
+        return
 
     if step == "set_message":
-        # Seu código original aqui
-        pass
+        text = m.text.strip()
+        if len(text) < 3:
+            await m.answer("❌ Mensagem muito curta.")
+            return
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE loop_config SET message=? WHERE user_id=?", (text, user_id))
+            await db.commit()
+        LOGIN_STATE.pop(user_id, None)
+        await m.answer("✅ Mensagem salva.")
+        return
+
     if step == "set_interval":
-        # Seu código original aqui
-        pass
+        try:
+            minutes = int(m.text.strip())
+        except:
+            await m.answer("❌ Envie apenas o número em minutos.")
+            return
+        seconds = minutes * 60
+        if seconds < MIN_INTERVAL_SECONDS:
+            await m.answer("❌ Intervalo mínimo é 30 minutos.")
+            return
+        async with aiosqlite.connect(DB) as db:
+            await db.execute("UPDATE loop_config SET interval_seconds=? WHERE user_id=?", (seconds, user_id))
+            await db.commit()
+        LOGIN_STATE.pop(user_id, None)
+        await m.answer(f"✅ Intervalo salvo: {minutes} minutos.")
+        return
+
 
 # =========================
-# RESTO DO CÓDIGO (Loop, SyncPay, Admin, Run)
+# RUN
 # =========================
-# Cole aqui todo o resto do seu código original (loop_worker, set_running, syncpay, etc.)
+
+async def main():
+    await db_init()
+    # await restore_running_loops()  # descomente depois se quiser
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
