@@ -564,12 +564,16 @@ async def trial(c: CallbackQuery):
         reply_markup=config_kb()
     )
 
-@def planos_kb():
-    """Teclado de planos (temporário)"""
+# =========================
+# TECLADO DE PLANOS
+# =========================
+
+def planos_kb():
+    """Cria o teclado com os planos"""
     builder = InlineKeyboardBuilder()
     for plano_id, info in PLANOS.items():
         builder.button(
-            text=f"{info['nome']} - R$ {info['valor']}",
+            text=f"{info['nome']} - R$ {float(info['valor'])}",
             callback_data=f"comprar_{plano_id}"
         )
     builder.adjust(1)
@@ -580,7 +584,10 @@ async def trial(c: CallbackQuery):
 @dp.callback_query(F.data == "planos")
 async def planos(c: CallbackQuery):
     await c.answer()
-    await c.message.edit_text("💎 Escolha um plano abaixo:", reply_markup=planos_kb())
+    await c.message.edit_text(
+        "💎 Escolha um plano abaixo:", 
+        reply_markup=planos_kb()
+    )
     
 # ====================== FUNÇÃO DE PERFIL ======================
 async def profile_text(user_id: int):
