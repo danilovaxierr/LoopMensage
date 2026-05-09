@@ -532,24 +532,56 @@ async def state_messages(m: Message):
 # CALLBACKS (MENU FUNCIONANDO)
 # =========================
 
+# =========================
+# TRIAL DE 3 DIAS GRÁTIS
+# =========================
+
 @dp.callback_query(F.data == "trial")
 async def trial(c: CallbackQuery):
-    await c.answer("🎁 Funcionalidade em breve!", show_alert=True)
+    await c.answer()
+    
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute("SELECT trial_used FROM users WHERE user_id=?", (c.from_user.id,))
+        row = await cur.fetchone()
+        trial_used = row[0] if row else 0   # 0 = nunca usou
+
+    if trial_used == 1:
+        await c.message.answer("❌ Você já utilizou seu trial de 3 dias grátis.")
+        return
+
+    # Ativa o trial de 3 dias
+    await add_time(c.from_user.id, 3 * 1440)  # 3 dias = 4320 minutos
+
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("UPDATE users SET trial_used=1 WHERE user_id=?", (c.from_user.id,))
+        await db.commit()
+
+    await c.message.answer(
+        "🎁 **Parabéns! Trial de 3 dias ativado com sucesso!**\n\n"
+        "✅ Sua conta está ativa até " + (await is_active(c.from_user.id) and "agora" or "verificar no perfil") + "\n\n"
+        "Agora vá em **⚙️ CONFIGURAR LOOP** para conectar sua conta e começar a divulgar.",
+        parse_mode="Markdown",
+        reply_markup=config_kb()
+    )
+
+@def planos_kb():
+    """Teclado de planos (temporário)"""
+    builder = InlineKeyboardBuilder()
+    for plano_id, info in PLANOS.items():
+        builder.button(
+            text=f"{info['nome']} - R$ {info['valor']}",
+            callback_data=f"comprar_{plano_id}"
+        )
+    builder.adjust(1)
+    builder.row(InlineKeyboardButton(text="⬅️ Voltar", callback_data="voltar"))
+    return builder.as_markup()
 
 
 @dp.callback_query(F.data == "planos")
 async def planos(c: CallbackQuery):
+    await c.answer()
     await c.message.edit_text("💎 Escolha um plano abaixo:", reply_markup=planos_kb())
-
-
-@dp.callback_query(F.data == "config_loop")
-async def config_loop(c: CallbackQuery):
-    await c.message.edit_text(
-        "⚙️ CONFIGURAR LOOP MENSAGE\n\nEscolha uma opção abaixo:",
-        reply_markup=config_kb()
-    )
-
-
+    
 # ====================== FUNÇÃO DE PERFIL ======================
 async def profile_text(user_id: int):
     """Retorna texto do perfil do usuário"""
@@ -649,6 +681,49 @@ async def stop_loop(c: CallbackQuery):
         USER_TASKS.pop(c.from_user.id, None)
 
     await c.message.answer("⏹️ Loop parado com sucesso.")
+
+# =========================
+# PAINEL ADMINISTRADOR
+# =========================
+
+ADMIN_PASSWORD = "147147147"
+
+@dp.message(Command("admin"))
+async def admin_command(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        await m.answer("❌ Acesso negado.")
+        return
+    
+    await m.answer(
+        "🔑 **Painel Administrativo**\n\n"
+        "Envie: `/adddias ID_DO_USUARIO QUANTIDADE_DIAS`",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(Command("adddias"))
+async def add_dias_command(m: Message):
+    if m.from_user.id != ADMIN_ID:
+        return
+    
+    try:
+        _, user_id, dias = m.text.split()
+        user_id = int(user_id)
+        dias = int(dias)
+        
+        minutes = dias * 1440  # 1 dia = 1440 minutos
+        
+        new_exp = await add_time(user_id, minutes)
+        
+        await m.answer(
+            f"✅ **Adicionado com sucesso!**\n\n"
+            f"Usuário: `{user_id}`\n"
+            f"Dias adicionados: {dias}\n"
+            f"Nova expiração: {new_exp.date()}",
+            parse_mode="Markdown"
+        )
+    except:
+        await m.answer("❌ Uso correto:\n`/adddias ID_DO_USUARIO QUANTIDADE_DIAS`")
 
 # =========================
 # RUN (PARA RENDER)
