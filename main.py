@@ -226,21 +226,27 @@ async def start(m: Message):
 async def my_referral(c: CallbackQuery):
     await c.answer()
     user_id = c.from_user.id
+    
     async with aiosqlite.connect(DB) as db:
-        cur = await db.execute("SELECT code FROM referrals WHERE user_id=? AND used_by IS NULL", (user_id,))
+        cur = await db.execute(
+            "SELECT code FROM referrals WHERE user_id=? AND used_by IS NULL", 
+            (user_id,)
+        )
         row = await cur.fetchone()
         code = row[0] if row else await generate_referral_code(user_id)
 
     bot_user = await bot.get_me()
     link = f"https://t.me/{bot_user.username}?start={code}"
 
-    await c.message.answer(
-        f"🔗 **Seu Link de Indicação**\n\n"
-        f"{link}\n\n"
-        f"**Código:** `{code}`\n\n"
-        "Envie para seus amigos!", parse_mode="Markdown"
+    texto = (
+        "🔗 <b>Seu Link de Indicação</b>\n\n"
+        f"<code>{link}</code>\n\n"
+        f"<b>Código:</b> <code>{code}</code>\n\n"
+        "Compartilhe esse link com seus amigos!\n"
+        "Quando alguém usar o código, vocês dois ganham bônus."
     )
 
+    await c.message.answer(texto, parse_mode="HTML")
 # Cole aqui todo o resto do seu código original (do @dp.callback_query(F.data == "voltar") até o final)
 
 @dp.callback_query(F.data == "voltar")
