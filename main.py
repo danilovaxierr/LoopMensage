@@ -224,7 +224,7 @@ async def start(m: Message):
         "Escolha uma opção abaixo:",
         reply_markup=main_kb(),
         parse_mode="Markdown"
-    ))
+    )
 
 @dp.callback_query(F.data == "my_referral")
 async def my_referral(c: CallbackQuery):
