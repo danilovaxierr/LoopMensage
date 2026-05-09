@@ -285,7 +285,10 @@ async def state_messages(m: Message):
             }
 
             await m.answer(
-                "✅ Código enviado!\n\nEnvie no formato:\n`loop12345`",
+                "✅ Código enviado!\n\n"
+                "Envie no formato:\n"
+                "`loop12345`\n\n"
+                "Exemplo: `loop54213`",
                 parse_mode="Markdown"
             )
         except Exception as e:
@@ -316,18 +319,33 @@ async def state_messages(m: Message):
             await m.answer(f"❌ Erro: {str(e)}")
         return
 
-    # Outros estados (adicione depois se precisar)
-    if step == "set_message" or step == "set_interval" or step == "password":
-        pass  # temporário
-
 
 # =========================
-# RUN (CORRIGIDO PARA RENDER)
+# CALLBACKS FALTANTES (IMPORTANTE)
+# =========================
+
+@dp.callback_query(F.data == "planos")
+async def planos(c: CallbackQuery):
+    await c.message.edit_text("💎 Escolha um plano:", reply_markup=planos_kb())
+
+@dp.callback_query(F.data == "config_loop")
+async def config_loop(c: CallbackQuery):
+    await c.message.edit_text(
+        "⚙️ Configurar Loop\n\nEscolha uma opção:",
+        reply_markup=config_kb()
+    )
+
+@dp.callback_query(F.data == "trial")
+async def trial(c: CallbackQuery):
+    await c.answer("Em breve...", show_alert=True)
+
+# =========================
+# RUN (PARA RENDER)
 # =========================
 
 async def run_bot():
     await db_init()
-    print("🤖 Bot iniciado...")
+    print("🤖 Bot iniciado com sucesso!")
     await dp.start_polling(bot)
 
 
