@@ -160,7 +160,7 @@ def config_kb():
         [InlineKeyboardButton(text="⏹️ PARAR LOOP", callback_data="stop_loop")],
         [InlineKeyboardButton(text="⬅️ VOLTAR", callback_data="voltar")],
     ])
-    # =========================
+# =========================
 # TELETHON
 # =========================
 
@@ -207,6 +207,82 @@ async def clear_temp_login(user_id: int):
         await db.execute("DELETE FROM temp_logins WHERE user_id=?", (user_id,))
         await db.commit()
 
+# =========================
+# LOOP DE DIVULGAÇÃO (NOVO)
+# =========================
+
+async def get_loop_config(user_id: int):
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT message, interval_seconds, running FROM loop_config WHERE user_id=?",
+            (user_id,)
+        )
+        return await cur.fetchone()
+
+
+async def get_user_chats(user_id: int):
+    async with aiosqlite.connect(DB) as db:
+        cur = await db.execute(
+            "SELECT chat_id, title FROM loop_chats WHERE user_id=?",
+            (user_id,)
+        )
+        return await cur.fetchall()
+
+
+async def send_loop_message(client, chat_id: int, message: str):
+    try:
+        await client.send_message(chat_id, message)
+        print(f"Mensagem enviada para chat {chat_id}")
+        return True
+    except Exception as e:
+        print(f"Erro ao enviar em {chat_id}: {e}")
+        return False
+
+
+async def user_loop_task(user_id: int):
+    while True:
+        try:
+            config = await get_loop_config(user_id)
+            if not config or config[2] == 0:  # running == 0
+                break
+
+            message = config[0]
+            interval = config[1] or 3600
+
+            if not message:
+                await asyncio.sleep(60)
+                continue
+
+            session_string = await get_session(user_id)
+            if not session_string:
+                break
+
+            client = make_client(session_string)
+            await client.connect()
+
+            chats = await get_user_chats(user_id)
+            if not chats:
+                await asyncio.sleep(300)
+                await client.disconnect()
+                continue
+
+            for chat_id, title in chats:
+                await send_loop_message(client, chat_id, message)
+                await asyncio.sleep(3)  # Delay anti-flood
+
+            await client.disconnect()
+            await asyncio.sleep(interval)
+
+        except Exception as e:
+            print(f"Erro no loop do usuário {user_id}: {e}")
+            await asyncio.sleep(60)
+
+
+def start_user_loop(user_id: int):
+    if user_id in USER_TASKS and not USER_TASKS[user_id].done():
+        return
+    task = asyncio.create_task(user_loop_task(user_id))
+    USER_TASKS[user_id] = task
 
 # =========================
 # HANDLERS PRINCIPAIS
@@ -295,13 +371,13 @@ async def state_messages(m: Message):
             await m.answer(f"❌ Erro: {e}")
         return
 
-    if step == "code":
+   if step == "code":
         text = m.text.strip()
         code = re.sub(r'(?i)^loop', '', text).strip()
         code = ''.join(filter(str.isdigit, code))
 
         if len(code) < 4:
-            await m.answer("❌ Código inválido.\nEnvie: `loop12345`")
+            await m.answer("❌ Código inválido.\nEnvie no formato: `loop12345`")
             return
 
         phone = state.get("phone")
@@ -314,9 +390,34 @@ async def state_messages(m: Message):
             await save_session(user_id, phone, session_string)
             await clear_temp_login(user_id)
             LOGIN_STATE.pop(user_id, None)
-            await m.answer("✅ Conta conectada com sucesso!\n\nVá em 📢 MEUS GRUPOS/CANAIS")
+
+            await m.answer("✅ **Conta conectada com sucesso!**\n\nAgora configure sua mensagem e grupos.", parse_mode="Markdown")
+
+            # Inicia loop automaticamente se já estiver configurado como running
+            config = await get_loop_config(user_id)
+            if config and config[2] == 1:
+                start_user_loop(user_id)
+
         except Exception as e:
-            await m.answer(f"❌ Erro: {str(e)}")
+            await m.answer(f"❌ Erro ao fazer login: {str(e)}")
+        return
+
+    # === NOVA PARTE - Definir Mensagem ===
+    if step == "set_message":
+        message_text = m.text.strip()
+        if len(message_text) < 3:
+            await m.answer("❌ Mensagem muito curta. Tente novamente.")
+            return
+
+        async with aiosqlite.connect(DB) as db:
+            await db.execute(
+                "UPDATE loop_config SET message=? WHERE user_id=?",
+                (message_text, user_id)
+            )
+            await db.commit()
+
+        LOGIN_STATE.pop(user_id, None)
+        await m.answer("✅ **Mensagem salva com sucesso!**", reply_markup=config_kb())
         return
 
 
@@ -352,6 +453,73 @@ async def perfil(c: CallbackQuery):
 async def voltar(c: CallbackQuery):
     await c.message.edit_text("Menu principal:", reply_markup=main_kb())
 
+# ====================== CONFIGURAÇÃO DO LOOP ======================
+
+@dp.callback_query(F.data == "set_message")
+async def set_message_callback(c: CallbackQuery):
+    await c.answer()
+    LOGIN_STATE[c.from_user.id] = {"step": "set_message"}
+    await c.message.answer(
+        "📝 **Envie a mensagem que deseja divulgar** nos grupos e canais:\n\n"
+        "Pode usar emojis, links, @menções, etc.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "set_interval")
+async def set_interval_callback(c: CallbackQuery):
+    await c.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="30 minutos", callback_data="interval_1800")],
+        [InlineKeyboardButton(text="1 hora", callback_data="interval_3600")],
+        [InlineKeyboardButton(text="2 horas", callback_data="interval_7200")],
+        [InlineKeyboardButton(text="4 horas", callback_data="interval_14400")],
+        [InlineKeyboardButton(text="⬅️ Voltar", callback_data="config_loop")],
+    ])
+    await c.message.answer("⏱️ Escolha o intervalo entre as divulgações:", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("interval_"))
+async def interval_selected(c: CallbackQuery):
+    await c.answer()
+    seconds = int(c.data.split("_")[1])
+    async with aiosqlite.connect(DB) as db:
+        await db.execute(
+            "UPDATE loop_config SET interval_seconds=? WHERE user_id=?",
+            (seconds, c.from_user.id)
+        )
+        await db.commit()
+    await c.message.edit_text(f"✅ Intervalo definido para **{seconds//60} minutos**!", reply_markup=config_kb())
+
+
+@dp.callback_query(F.data == "start_loop")
+async def start_loop(c: CallbackQuery):
+    await c.answer()
+    session = await get_session(c.from_user.id)
+    if not session:
+        await c.message.answer("❌ Você precisa conectar sua conta Telegram primeiro!")
+        return
+
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("UPDATE loop_config SET running=1 WHERE user_id=?", (c.from_user.id,))
+        await db.commit()
+
+    start_user_loop(c.from_user.id)
+    await c.message.answer("▶️ **Loop de divulgação iniciado com sucesso!**", parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "stop_loop")
+async def stop_loop(c: CallbackQuery):
+    await c.answer()
+    async with aiosqlite.connect(DB) as db:
+        await db.execute("UPDATE loop_config SET running=0 WHERE user_id=?", (c.from_user.id,))
+        await db.commit()
+
+    if c.from_user.id in USER_TASKS:
+        USER_TASKS[c.from_user.id].cancel()
+        USER_TASKS.pop(c.from_user.id, None)
+
+    await c.message.answer("⏹️ Loop parado com sucesso.")
 
 # =========================
 # RUN (PARA RENDER)
