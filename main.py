@@ -86,8 +86,10 @@ async def db_init():
 
 async def ensure_user(m: Message):
     async with aiosqlite.connect(DB) as db:
-        await db.execute("INSERT OR IGNORE INTO users(user_id, username, first_name) VALUES(?,?,?)", (m.from_user.id, m.from_user.username, m.from_user.first_name))
-        await db.execute("INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)", (m.from_user.id, 3600, 0))
+        await db.execute("INSERT OR IGNORE INTO users(user_id, username, first_name) VALUES(?,?,?)", 
+                        (m.from_user.id, m.from_user.username, m.from_user.first_name))
+        await db.execute("INSERT OR IGNORE INTO loop_config(user_id, interval_seconds, running) VALUES(?,?,?)", 
+                        (m.from_user.id, 3600, 0))
         await db.commit()
 
 # =========================
@@ -116,11 +118,12 @@ async def redeem_referral_code(m: Message, code: str):
             await m.answer("❌ Você não pode usar seu próprio código.")
             return
 
-        await db.execute("UPDATE referrals SET used_by=?, used_at=? WHERE code=?", (user_id, datetime.datetime.utcnow().isoformat(), code))
+        await db.execute("UPDATE referrals SET used_by=?, used_at=? WHERE code=?", 
+                        (user_id, datetime.datetime.utcnow().isoformat(), code))
         await db.commit()
 
-    await add_time(owner_id, 24 * 60)   # 1 dia para quem indicou
-    await add_time(user_id, 12 * 60)    # 12 horas para o novo
+    await add_time(owner_id, 24 * 60)
+    await add_time(user_id, 12 * 60)
 
     await m.answer("🎉 **Código resgatado com sucesso!**\n\n✅ Você ganhou **12 horas**\n✅ Quem te indicou ganhou **1 dia** extra")
 
@@ -163,7 +166,6 @@ def main_kb():
         [InlineKeyboardButton(text="📞 SUPORTE", url=f"https://t.me/{SUPORTE_USERNAME}")],
     ])
 
-# ... Continue na PARTE 2
 def config_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔐 CONECTAR CONTA TELEGRAM", callback_data="connect_account")],
@@ -201,8 +203,6 @@ async def save_session(user_id: int, phone: str, session_string: str):
                          (user_id, phone, session_string, datetime.datetime.utcnow().isoformat()))
         await db.commit()
 
-# (Mantenha todas as funções telethon que você já tinha: save_temp_login, get_temp_login, get_admin_chats, etc.)
-
 # =========================
 # HANDLERS
 # =========================
@@ -217,7 +217,6 @@ async def start(m: Message):
             await redeem_referral_code(m, code)
             return
 
-    # Menu com botões
     await m.answer(
         "👋 Olá! Seja bem-vindo(a) ao **Loop Mensage**!\n\n"
         "Automação inteligente para divulgação no Telegram.\n\n"
@@ -232,10 +231,7 @@ async def my_referral(c: CallbackQuery):
     user_id = c.from_user.id
     
     async with aiosqlite.connect(DB) as db:
-        cur = await db.execute(
-            "SELECT code FROM referrals WHERE user_id=? AND used_by IS NULL", 
-            (user_id,)
-        )
+        cur = await db.execute("SELECT code FROM referrals WHERE user_id=? AND used_by IS NULL", (user_id,))
         row = await cur.fetchone()
         code = row[0] if row else await generate_referral_code(user_id)
 
@@ -251,7 +247,6 @@ async def my_referral(c: CallbackQuery):
     )
 
     await c.message.answer(texto, parse_mode="HTML")
-# Cole aqui todo o resto do seu código original (do @dp.callback_query(F.data == "voltar") até o final)
 
 @dp.callback_query(F.data == "voltar")
 async def voltar(c: CallbackQuery):
@@ -260,7 +255,13 @@ async def voltar(c: CallbackQuery):
         "👋 Menu Principal\n\nEscolha uma opção abaixo:",
         reply_markup=main_kb()
     )
-# ... (coloque todo o resto aqui: perfil, trial, planos, config_loop, connect_account, etc.)
+
+# =========================
+# AQUI VOCÊ DEVE COLAR TODO O RESTO DO SEU CÓDIGO ORIGINAL
+# (trial, perfil, planos, config_loop, connect_account, my_chats, etc.)
+# =========================
+
+# Cole aqui todas as outras funções que estavam no seu código original...
 
 # =========================
 # RUN
